@@ -1,7 +1,9 @@
 
 ESP8266 LED Matrix Clock - Modern Edition
+
 Acknowledgements: 
 Original code by @cbm80amiga here - https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
+
 Libraries:
 	tzapu/WiFiManager
 	neptune2/simpleDSTadjust

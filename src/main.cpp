@@ -12,8 +12,16 @@
  * - Switch LDR sensitivity via web interface and On/Off
  * - Implement web interface for full configuration
  * - Add OTA firmware update capability
+ * - tidy up web interface and combine all configuration into single page
  * 
  * ======================== CHANGELOG ========================
+ * 
+ * v2.1 - 2025-12-15
+ *  - Fixed display schedule end time variable initialization order
+ *  - Enable Fahrenheit/Celsius toggle via web interface
+ * 
+ * 
+ * 
  * 
  * v2.0 - 2025-12-14
  *   - Web UI: replaced full-page refresh with AJAX updates for time and selective
@@ -209,16 +217,24 @@ bool displayOn = true;
 bool motionDetected = false;
 bool brightnessManualOverride = true;  // Manual brightness mode flag
 int manualBrightness = 4;               // Manual brightness value (1-15)
+bool displayManualOverride = false;     // Manual display on/off override flag
+unsigned long displayManualOverrideTimeout = 0;  // Timeout for manual override (in milliseconds)
+#define DISPLAY_MANUAL_OVERRIDE_DURATION 300000  // 5 minutes
 
 // Display Schedule Configuration
-bool displayScheduleEnabled = true;    // Enable/disable scheduled on/off times
+bool displayScheduleEnabled = false;    // Enable/disable scheduled on/off times (default: disabled)
 int scheduleStartHour = 6;              // Turn on at 6:00 AM
 int scheduleStartMinute = 0;
-int scheduleEndHour = 5;               // Turn off at 5:00 PM
+int scheduleEndHour = 22;               // Turn off at 10:00 PM
 int scheduleEndMinute = 0;
+
+// Temperature Unit Configuration
+bool useFahrenheit = false;             // false = Celsius (default), true = Fahrenheit
 
 // Timing
 unsigned long lastNTPUpdate = 0;
+unsigned long startupTime = 0;          // Track startup time for grace period
+#define STARTUP_GRACE_PERIOD 10000      // 10 seconds - keep display on at startup
 unsigned long lastModeChange = 0;
 
 // ======================== FONT HELPER FUNCTIONS ========================
@@ -261,6 +277,19 @@ void printString(const char* s, const uint8_t* font) {
   while (*s) printChar(*s++, font);
 }
 
+// ======================== TEMPERATURE HELPER FUNCTION ========================
+
+int getDisplayTemperature() {
+  if (useFahrenheit) {
+    return (temperature * 9 / 5) + 32;  // Convert Celsius to Fahrenheit
+  }
+  return temperature;
+}
+
+char getTempUnit() {
+  return useFahrenheit ? 'F' : 'C';
+}
+
 // ======================== FORWARD DECLARATIONS ========================
 
 void printBanner();
@@ -283,6 +312,9 @@ void setup()
 {
   Serial.begin(115200);
   delay(100);
+  
+  // Record startup time for grace period
+  startupTime = millis();
   
   printBanner();
   
@@ -421,7 +453,9 @@ void displayTimeAndTemp() {
   yPos = 1;
   xPos = 1;
   if (sensorAvailable) {
-    sprintf(txt, "T%d H%d", temperature, humidity);
+    int displayTemp = getDisplayTemperature();
+    char tempUnit = getTempUnit();
+    sprintf(txt, "T%d%c H%d", displayTemp, tempUnit, humidity);
   } else {
     sprintf(txt, "NO SENSOR");
   }
@@ -585,6 +619,17 @@ bool isWithinScheduleWindow() {
 }
 
 void handleBrightnessAndMotion() {
+  // During startup grace period, keep display on with fresh motion detection
+  if (millis() - startupTime < STARTUP_GRACE_PERIOD) {
+    displayOn = true;
+    displayTimer = DISPLAY_TIMEOUT;  // Reset display timer to keep it on
+    sendCmdAll(CMD_SHUTDOWN, 1);
+    int ambientBrightness = 15 - map(constrain(analogRead(LDR_PIN), 0, 1023), 0, 1023, 1, 15);
+    brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
+    sendCmdAll(CMD_INTENSITY, brightness);
+    return;
+  }
+  
   // Read ambient light
   lightLevel = analogRead(LDR_PIN);
   
@@ -597,6 +642,22 @@ void handleBrightnessAndMotion() {
   // Check if within schedule window
   bool withinSchedule = isWithinScheduleWindow();
   
+  // Check if manual override timeout has expired
+  if (displayManualOverride && millis() > displayManualOverrideTimeout) {
+    displayManualOverride = false;
+    DEBUG(Serial.println("Display manual override timeout - reverting to automatic control"));
+  }
+  
+  // If manual override is active, respect the user's choice
+  if (displayManualOverride) {
+    // Manual override is active - only adjust brightness if on, don't change on/off state
+    if (displayOn) {
+      brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
+      sendCmdAll(CMD_INTENSITY, brightness);
+    }
+    return;
+  }
+  
   if (withinSchedule && motionDetected) {
     // Motion detected and within schedule - turn on and reset timer
     displayTimer = DISPLAY_TIMEOUT;
@@ -605,8 +666,8 @@ void handleBrightnessAndMotion() {
     brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
     sendCmdAll(CMD_SHUTDOWN, 1);
     sendCmdAll(CMD_INTENSITY, brightness);
-  } else if (!withinSchedule) {
-    // Outside schedule window - force display off
+  } else if (!withinSchedule && displayScheduleEnabled) {
+    // Outside schedule window and schedule is enabled - force display off
     if (displayOn) {
       displayOn = false;
       sendCmdAll(CMD_SHUTDOWN, 0);
@@ -655,6 +716,7 @@ void setupWebServer() {
     html += "    document.getElementById('brightness-status').innerText = d.brightness + '/15';";
     html += "    document.getElementById('light-status').innerText = d.light;";
     html += "    document.getElementById('brightness-mode').innerText = d.mode;";
+    html += "    document.getElementById('temp-unit-display').innerText = d.temp_unit;";
     html += "    let scheduleNotice = document.getElementById('schedule-notice');";
     html += "    if (d.schedule_disabled || d.outside_schedule) {";
     html += "      scheduleNotice.style.display = 'block';";
@@ -675,25 +737,39 @@ void setupWebServer() {
     html += "<p id='date-display'>" + String(day) + "/" + String(month) + "/" + String(year) + "</p>";
     
     if (sensorAvailable) {
-      html += "<p>Temperature: " + String(temperature) + "°C | Humidity: " + String(humidity) + "%</p>";
+      int displayTemp = getDisplayTemperature();
+      char tempUnit = getTempUnit();
+      html += "<p>Temperature: " + String(displayTemp) + "°" + String(tempUnit) + " | Humidity: " + String(humidity) + "%</p>";
     }
     html += "</div>";
     
     html += "<div class='card'><h2>Status</h2>";
     html += "<p style='color:red;font-weight:bold;' id='schedule-notice' style='display:none;'></p>";
     html += "<p>Display: <span id='display-status'>" + String(displayOn ? "ON" : "OFF") + "</span></p>";
+    html += "<p><a href='/display?mode=toggle'>Toggle Display ON/OFF</a></p>";
     html += "<p>Motion: <span id='motion-status'>" + String(motionDetected ? "Detected" : "None") + "</span></p>";
     html += "<p>Current Brightness: <span id='brightness-status'>" + String(brightness) + "/15</span></p>";
     html += "<p>Light Level: <span id='light-status'>" + String(lightLevel) + "</span></p></div>";
     
-    html += "<div class='card'><h2>Brightness Control</h2>";
+    html += "<div class='card'><h2>Configuration</h2>";
+    
+    // Brightness Control Section
+    html += "<h3 style='margin-top:0;'>Brightness Control</h3>";
     html += "<p>Mode: <span id='brightness-mode'>" + String(brightnessManualOverride ? "Manual" : "Auto") + "</span></p>";
     if (brightnessManualOverride) {
       html += "<p><label>Manual Brightness: <input type='range' min='1' max='15' value='" + String(manualBrightness) + "' onchange=\"fetch('/brightness?value=' + this.value).then(() => updateStatus())\"></label></p>";
     }
-    html += "<p><a href='/brightness?mode=toggle'>Toggle Auto/Manual</a></p></div>";
+    html += "<p><a href='/brightness?mode=toggle'>Toggle Auto/Manual</a></p>";
     
-    html += "<div class='card'><h2>Display Schedule</h2>";
+    // Temperature Unit Section
+    html += "<hr style='margin:15px 0;'>";
+    html += "<h3>Temperature Unit</h3>";
+    html += "<p>Current Unit: <span id='temp-unit-display'>" + String(useFahrenheit ? "Fahrenheit (°F)" : "Celsius (°C)") + "</span></p>";
+    html += "<p><a href='/temperature?mode=toggle'>Toggle to " + String(useFahrenheit ? "Celsius" : "Fahrenheit") + "</a></p>";
+    
+    // Display Schedule Section
+    html += "<hr style='margin:15px 0;'>";
+    html += "<h3>Display Schedule</h3>";
     html += "<form method='POST' action='/schedule'>";
     html += "<p><label><input type='checkbox' name='enabled' value='1' " + String(displayScheduleEnabled ? "checked" : "") + "> Enable Schedule</label></p>";
     html += "<p><label>Turn On: <input type='number' name='start_hour' min='0' max='23' value='" + String(scheduleStartHour) + "' style='width:50px;'>:";
@@ -734,6 +810,8 @@ void setupWebServer() {
     json += String(lightLevel);
     json += ",\"mode\":\"";
     json += String(brightnessManualOverride ? "Manual" : "Auto");
+    json += "\",\"temp_unit\":\"";
+    json += String(useFahrenheit ? "Fahrenheit (°F)" : "Celsius (°C)");
     json += "\",\"schedule_disabled\":";
     json += String(!displayScheduleEnabled ? "true" : "false");
     json += ",\"outside_schedule\":";
@@ -766,6 +844,45 @@ void setupWebServer() {
       brightness = manualBrightness;
       sendCmdAll(CMD_INTENSITY, brightness);
       DEBUG(Serial.printf("Manual brightness set to: %d\n", manualBrightness));
+    }
+    server.send(200, "text/plain", "OK");
+  });
+  
+  // Temperature unit toggle endpoint
+  server.on("/temperature", []() {
+    if (server.hasArg("mode")) {
+      // Toggle Celsius/Fahrenheit
+      useFahrenheit = !useFahrenheit;
+      DEBUG(Serial.printf("Temperature unit: %s\n", useFahrenheit ? "Fahrenheit" : "Celsius"));
+      // Redirect to home page to refresh and show change
+      server.sendHeader("Location", "/");
+      server.send(302, "text/plain", "");
+      return;
+    }
+    server.send(200, "text/plain", "OK");
+  });
+  
+  // Display on/off toggle endpoint
+  server.on("/display", []() {
+    if (server.hasArg("mode")) {
+      // Toggle display on/off
+      displayOn = !displayOn;
+      displayManualOverride = true;
+      displayManualOverrideTimeout = millis() + DISPLAY_MANUAL_OVERRIDE_DURATION;
+      
+      if (displayOn) {
+        sendCmdAll(CMD_SHUTDOWN, 1);
+        brightness = brightnessManualOverride ? manualBrightness : lightLevel / 512 * 15;
+        sendCmdAll(CMD_INTENSITY, brightness);
+        DEBUG(Serial.printf("Display toggled ON (manual override for 5 minutes)\n"));
+      } else {
+        sendCmdAll(CMD_SHUTDOWN, 0);
+        DEBUG(Serial.printf("Display toggled OFF (manual override for 5 minutes)\n"));
+      }
+      // Redirect to home page to refresh and show change
+      server.sendHeader("Location", "/");
+      server.send(302, "text/plain", "");
+      return;
     }
     server.send(200, "text/plain", "OK");
   });
