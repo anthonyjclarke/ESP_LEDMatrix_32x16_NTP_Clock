@@ -13,12 +13,14 @@
  * - Implement web interface for full configuration
  * - Add OTA firmware update capability
  * - tidy up web interface and combine all configuration into single page
+ * - Fix Readme formatting
  * 
  * ======================== CHANGELOG ========================
  * 
  * v2.1 - 2025-12-15
  *  - Fixed display schedule end time variable initialization order
  *  - Enable Fahrenheit/Celsius toggle via web interface
+ *  - Changed sensor to BME280 on 0x76, default for many modules is 0x77 so BE AWARE
  * 
  * 
  * 
@@ -50,7 +52,7 @@
  * v1.0 - October 2025
  *        Complete rewrite with modern practices:
  *        - WiFiManager for easy WiFi setup (no hardcoded credentials)
- *        - SHT30 I2C temperature/humidity sensor
+ *        - BMP/BME280 I2C temperature/pressure/humidity sensor
  *        - Automatic NTP time synchronization with DST support
  *        - PIR motion sensor for auto-off/on
  *        - LDR for automatic brightness control
@@ -70,11 +72,12 @@
  *   GND  -> GND
  *   Note: Add 100-470µF capacitor between VCC and GND
  * 
- * SHT30 Temperature/Humidity Sensor (I2C):
- *   VCC  -> 3.3V ⚠️ IMPORTANT: Use 3.3V NOT 5V!
+ * BMP/BME280 Temperature/Pressure/Humidity Sensor (I2C):
+ *   VCC  -> 3.3V
  *   GND  -> GND
  *   SDA  -> D2 (GPIO4)
  *   SCL  -> D1 (GPIO5)
+ *   Note: Supports BMP280 (temperature/pressure) or BME280 (temperature/pressure/humidity)
  * 
  * PIR Motion Sensor:
  *   VCC  -> 5V
@@ -118,7 +121,7 @@
 #include <time.h>
 #include <simpleDSTadjust.h>
 #include <Wire.h>
-#include <WEMOS_SHT3X.h>
+#include <Adafruit_BME280.h>
 
 // ======================== CONFIGURATION ========================
 
@@ -186,7 +189,7 @@ struct dstRule endRule = DST_END_RULE;
 simpleDSTadjust dstAdjusted(startRule, endRule);
 
 // Sensors
-SHT3X sht30(0x45);
+Adafruit_BME280 bme280;
 
 // Web Server
 ESP8266WebServer server(80);
@@ -207,6 +210,7 @@ char txt[32];
 // Sensor Data
 int temperature = 0;
 int humidity = 0;
+int pressure = 0;              // Pressure in hPa (BME280/BMP280)
 bool sensorAvailable = false;
 
 // Display Control
@@ -324,8 +328,9 @@ void setup()
   sendCmdAll(CMD_SHUTDOWN, 1);
   sendCmdAll(CMD_INTENSITY, 5);
   
-  // Initialize I2C for SHT30
-  DEBUG(Serial.println("Initializing I2C and SHT30 sensor..."));
+  // Initialize I2C for BMP/BME280
+  DEBUG(Serial.println("Initializing I2C and BMP/BME280 sensor..."));
+    // Initialize I2C with SDA on D1 (GPIO5) and SCL on D2 (GPIO4)
   Wire.begin();
   delay(100);
   testSensor();
@@ -455,7 +460,7 @@ void displayTimeAndTemp() {
   if (sensorAvailable) {
     int displayTemp = getDisplayTemperature();
     char tempUnit = getTempUnit();
-    sprintf(txt, "T%d%c H%d", displayTemp, tempUnit, humidity);
+    sprintf(txt, "T%d%c H%d%%", displayTemp, tempUnit, humidity);
   } else {
     sprintf(txt, "NO SENSOR");
   }
@@ -560,41 +565,55 @@ void updateTime() {
 // ======================== SENSOR FUNCTIONS ========================
 
 void testSensor() {
-  DEBUG(Serial.print("Testing SHT30 sensor... "));
+  DEBUG(Serial.print("Testing BME280 sensor... "));
   
-  // Try to read from sensor - get() returns void, so we check the values
-  sht30.get();
-  
-  // Check if readings are valid (NaN check or reasonable range)
-  if (isnan(sht30.cTemp) || isnan(sht30.humidity) || 
-      sht30.cTemp < -40 || sht30.cTemp > 125) {
+  // Initialize BME280 at address 0x76
+  if (!bme280.begin(0x76)) {
     sensorAvailable = false;
     DEBUG(Serial.println("NOT FOUND!"));
     DEBUG(Serial.println("  Check wiring: SDA->D2, SCL->D1, VCC->3.3V"));
+    return;
+  }
+  
+  // Set default BME280 settings
+  bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
+                     Adafruit_BME280::SAMPLING_X2,
+                     Adafruit_BME280::SAMPLING_X16,
+                     Adafruit_BME280::SAMPLING_X1,
+                     Adafruit_BME280::FILTER_X16,
+                     Adafruit_BME280::STANDBY_MS_500);
+  
+  // Read first values to verify
+  temperature = (int)bme280.readTemperature();
+  pressure = (int)bme280.readPressure() / 100;  // Convert to hPa
+  humidity = (int)bme280.readHumidity();
+  
+  // Check if readings are valid
+  if (temperature < -40 || temperature > 85) {
+    sensorAvailable = false;
+    DEBUG(Serial.println("FAILED!"));
   } else {
     sensorAvailable = true;
-    temperature = (int)sht30.cTemp;
-    humidity = (int)sht30.humidity;
     DEBUG(Serial.println("OK!"));
     DEBUG(Serial.printf("  Temperature: %d°C\n", temperature));
     DEBUG(Serial.printf("  Humidity: %d%%\n", humidity));
+    DEBUG(Serial.printf("  Pressure: %d hPa\n", pressure));
   }
 }
 
 void updateSensorData() {
-  // Read sensor - get() returns void
-  sht30.get();
+  // Read sensor values
+  temperature = (int)bme280.readTemperature();
+  pressure = (int)bme280.readPressure() / 100;  // Convert Pa to hPa
+  humidity = (int)bme280.readHumidity();
   
   // Check if readings are valid
-  if (isnan(sht30.cTemp) || isnan(sht30.humidity) ||
-      sht30.cTemp < -40 || sht30.cTemp > 125) {
+  if (temperature < -40 || temperature > 85 || pressure < 300 || pressure > 1200 || humidity < 0 || humidity > 100) {
     sensorAvailable = false;
     DEBUG(Serial.println("Sensor read failed!"));
   } else {
-    temperature = (int)sht30.cTemp;
-    humidity = (int)sht30.humidity;
     sensorAvailable = true;
-    DEBUG(Serial.printf("Sensor: %d°C, %d%%\n", temperature, humidity));
+    DEBUG(Serial.printf("Sensor: %d°C, %d%% humidity, %d hPa\n", temperature, humidity, pressure));
   }
 }
 
@@ -698,6 +717,7 @@ void setupWebServer() {
   // Root page
   server.on("/", []() {
     String html = "<html><head><title>LED Clock</title>";
+    html += "<meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
     html += "<style>body{font-family:Arial;margin:20px;background:#f0f0f0;}";
     html += ".card{background:white;padding:20px;margin:10px;border-radius:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}";
@@ -717,6 +737,9 @@ void setupWebServer() {
     html += "    document.getElementById('light-status').innerText = d.light;";
     html += "    document.getElementById('brightness-mode').innerText = d.mode;";
     html += "    document.getElementById('temp-unit-display').innerText = d.temp_unit;";
+    html += "    if (d.sensor_available) {";
+    html += "      document.getElementById('sensor-data').innerHTML = 'Temperature: ' + d.temperature + '&deg; | Humidity: ' + d.humidity + '% | Pressure: ' + d.pressure + ' hPa';";
+    html += "    }";
     html += "    let scheduleNotice = document.getElementById('schedule-notice');";
     html += "    if (d.schedule_disabled || d.outside_schedule) {";
     html += "      scheduleNotice.style.display = 'block';";
@@ -724,6 +747,8 @@ void setupWebServer() {
     html += "    } else {";
     html += "      scheduleNotice.style.display = 'none';";
     html += "    }";
+    html += "  });";
+    html += "}";
     html += "  });";
     html += "}";
     html += "setInterval(updateTime, 1000);";
@@ -739,7 +764,9 @@ void setupWebServer() {
     if (sensorAvailable) {
       int displayTemp = getDisplayTemperature();
       char tempUnit = getTempUnit();
-      html += "<p>Temperature: " + String(displayTemp) + "°" + String(tempUnit) + " | Humidity: " + String(humidity) + "%</p>";
+      html += "<p id='sensor-data'>Temperature: " + String(displayTemp) + "&deg;" + String(tempUnit) + " | Humidity: " + String(humidity) + "% | Pressure: " + String(pressure) + " hPa</p>";
+    } else {
+      html += "<p id='sensor-data'>Sensor not available</p>";
     }
     html += "</div>";
     
@@ -800,6 +827,7 @@ void setupWebServer() {
   // API endpoint for status data (JSON)
   server.on("/api/status", []() {
     bool withinSchedule = isWithinScheduleWindow();
+    int displayTemp = getDisplayTemperature();
     String json = "{\"display\":\"";
     json += String(displayOn ? "ON" : "OFF");
     json += "\",\"motion\":\"";
@@ -811,8 +839,16 @@ void setupWebServer() {
     json += ",\"mode\":\"";
     json += String(brightnessManualOverride ? "Manual" : "Auto");
     json += "\",\"temp_unit\":\"";
-    json += String(useFahrenheit ? "Fahrenheit (°F)" : "Celsius (°C)");
-    json += "\",\"schedule_disabled\":";
+    json += String(useFahrenheit ? "Fahrenheit (&deg;F)" : "Celsius (&deg;C)");
+    json += "\",\"temperature\":";
+    json += String(displayTemp);
+    json += ",\"humidity\":";
+    json += String(humidity);
+    json += ",\"pressure\":";
+    json += String(pressure);
+    json += ",\"sensor_available\":";
+    json += String(sensorAvailable ? "true" : "false");
+    json += ",\"schedule_disabled\":";
     json += String(!displayScheduleEnabled ? "true" : "false");
     json += ",\"outside_schedule\":";
     json += String(!withinSchedule ? "true" : "false");
@@ -948,11 +984,14 @@ void printBanner() {
 
 void printStatus() {
   Serial.println("--- Status ---");
-  Serial.printf("Time: %02d:%02d:%02d | Date: %02d/%02d/%d\n",
+  Serial.printf("Time: %02d:%02d:%02d | Date: %02d/%02d/%d",
                 hours, minutes, seconds, day, month, year);
   if (sensorAvailable) {
-    Serial.printf("Temp: %d°C | Humid: %d%% | ", temperature, humidity);
+    Serial.printf(" | Temp: %d°C | Humidity: %d%%", temperature, humidity);
+  } else {
+    Serial.print(" | Sensor Not Available");
   }
+  Serial.println();
   Serial.printf("Light: %d | Bright: %d\n", lightLevel, brightness);
   Serial.printf("Motion: %s | Display: %s | Timer: %d\n",
                 motionDetected ? "YES" : "NO",

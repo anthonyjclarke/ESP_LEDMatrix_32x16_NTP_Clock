@@ -5,11 +5,16 @@ Acknowledgements:
 Original code by @cbm80amiga here - https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
 
 Libraries:
+
 	tzapu/WiFiManager
+
 	neptune2/simpleDSTadjust
+
     Wemos SHT3x - https://github.com/wemos/WEMOS_SHT3x_Arduino_Library
 
 =========================== CHANGELOG ==========================
+
+v2.1 - 15th December 2025
 
 v2.0 - 14th December 2025
     - Added AJAX-based web interface with flicker-free updates
