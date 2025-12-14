@@ -5,9 +5,40 @@
  * Author: Rewritten from original by Anthony Clarke
  * Acknowledgements: Original by @cbm80amiga here - https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
  * 
- * PlatformIO Version with WiFiManager
+ * =========================== TODO ==========================
+ * - Enable switching between 12/24 hour formats
+ * - Switch between Celsius/Fahrenheit
+ * - Switch between different timezones via web interface
+ * - Switch LDR sensitivity via web interface and On/Off
+ * - Implement web interface for full configuration
+ * - Add OTA firmware update capability
  * 
  * ======================== CHANGELOG ========================
+ * 
+ * v2.0 - 2025-12-14
+ *   - Web UI: replaced full-page refresh with AJAX updates for time and selective
+ *     Status updates to eliminate flicker.
+ *   - Web API: added `/api/time` and `/api/status` JSON endpoints.
+ *   - Brightness: added manual brightness override with Auto/Manual toggle and
+ *     a 1–15 slider in the web interface; `/brightness` endpoint to set/toggle.
+ *   - Scheduling: added display schedule (enable, start/end times) with
+ *     `/schedule` form + endpoint; display respects schedule and shows a
+ *     schedule notification in the web Status card when off.
+ *   - Display code: fixed `NUM_MAX` header-scope issue by reordering defines
+ *     before `max7219.h` include; cleaned unused variables (`fwd`, `fht`).
+ *   - UI: merged Current Time and Environment into a single card; added
+ *     on-demand Status refresh when brightness changes.
+ *   - Misc: improved debug output and added validation for schedule inputs.
+ * 
+ * v1.1 - December 2025
+    - Initial Github Repo
+    - Migrated to PlatformIO
+    - Sensor Code NOT Fully tested, Clock / Date and Time working
+    - Move fonts to separate header file
+    - Moved MAX7219 functions to separate header file
+    - PlatformIO Version with WiFiManager
+
+ * 
  * v1.0 - October 2025
  *        Complete rewrite with modern practices:
  *        - WiFiManager for easy WiFi setup (no hardcoded credentials)
@@ -17,28 +48,7 @@
  *        - LDR for automatic brightness control
  *        - Clean, well-structured code with proper error handling
  *        - Comprehensive debug output
- *        - Web interface for status
- * ===========================================================
- * 
- * ======================== PLATFORMIO SETUP ========================
- * 1. Create a new PlatformIO project
- * 2. Copy this file to src/main.cpp
- * 3. Use the platformio.ini configuration below
- * 4. Build and upload
- * 
- * platformio.ini contents:
- * -----------------------
- * [env:d1_mini]
- * platform = espressif8266
- * board = d1_mini
- * framework = arduino
- * monitor_speed = 115200
- * lib_deps = 
- *     tzapu/WiFiManager@^2.0.16-rc.2
- *     wemos/WEMOS SHT3x Arduino Library@^1.0.0
- *     neptune2/simpleDSTadjust@^1.0.1
- * -----------------------
- * ==================================================================
+ *        - Web interface for status and configuration Status
  * 
  * ======================== HARDWARE SETUP ========================
  * 
@@ -67,25 +77,30 @@
  *   3.3V -> 10kΩ resistor -> A0 -> LDR -> GND
  *   Optional: 100nF capacitor across LDR
  * 
- * ================================================================
- * 
- * ======================== FIRST TIME SETUP ========================
- * 1. Upload this sketch to your ESP8266
- * 2. ESP will create WiFi access point: "LED_Clock_Setup"
- * 3. Connect to this AP with your phone/computer
- * 4. Captive portal will open automatically (or go to 192.168.4.1)
- * 5. Select your WiFi network and enter password
- * 6. Click Save - ESP will connect and remember settings
- * 7. To reset WiFi settings, visit http://[device-ip]/reset
- * ==================================================================
- */
+ * ==============================================================================================
 
-/*
- * CHANGELOG SUMMARY
+ * DETAILED CHANGELOG SUMMARY (Co-Pilot)
  * - 2025-10-XX: Initial rewrite and features (see header above for full changelog).
  * - 2025-12-13: Removed unused variable 'fwd' from font helper to fix compiler warnings.
  * - 2025-12-13: Removed unused variable 'fht' from `charWidth()` to fix compiler warning.
  * - 2025-12-13: Added concise changelog comments section at top of code.
+ * - 2025-12-14: Moved NUM_MAX, LINE_WIDTH, ROTATE, and pin definitions before max7219.h include.
+ * - 2025-12-14: Fixed NUM_MAX scope error in max7219.h by reordering includes/defines.
+ * - 2025-12-14: Removed full-page refresh, replaced with JavaScript AJAX updates to eliminate flickering.
+ * - 2025-12-14: Added /api/time endpoint for JSON time data (1-second refresh).
+ * - 2025-12-14: Added /api/status endpoint for JSON status data (brightness, motion, display state).
+ * - 2025-12-14: Added manual brightness override with Auto/Manual toggle in web interface.
+ * - 2025-12-14: Added brightness slider (1-15) for manual brightness control.
+ * - 2025-12-14: Status section now updates on-demand when brightness is changed.
+ * - 2025-12-14: Added HTTP 302 redirect after brightness mode toggle to refresh page.
+ * - 2025-12-14: Added display schedule configuration (start/end times, enable/disable flag).
+ * - 2025-12-14: Added isWithinScheduleWindow() function for schedule validation.
+ * - 2025-12-14: Updated handleBrightnessAndMotion() to respect display schedule times.
+ * - 2025-12-14: Added schedule notification in web status section (shows when display is off due to schedule).
+ * - 2025-12-14: Enhanced /api/status endpoint with schedule_disabled, outside_schedule, schedule_start/end fields.
+ * - 2025-12-14: Added Display Schedule web form with enable/disable, start/end time inputs.
+ * - 2025-12-14: Added /schedule endpoint (POST) to handle display schedule configuration updates.
+ * - 2025-12-14: Merged Current Time and Environment sections on web page into single card.
  */
 
 #include <Arduino.h>
@@ -99,7 +114,7 @@
 
 // ======================== CONFIGURATION ========================
 
-// Display Configuration
+// Display Configuration (must be before max7219.h include)
 #define NUM_MAX 8                 // Number of MAX7219 modules
 #define LINE_WIDTH 32             // Display width in pixels
 #define ROTATE 90                 // Display rotation (0, 90, or 270)
@@ -112,6 +127,9 @@
 // Pin Definitions - Sensors
 #define PIR_PIN D3                // Motion sensor
 #define LDR_PIN A0                // Light sensor (analog)
+
+#include "max7219.h"
+#include "fonts.h"
 
 // Timing Configuration
 #define DISPLAY_TIMEOUT 60        // Seconds before display turns off (no motion)
@@ -189,249 +207,19 @@ int lightLevel = 512;
 int displayTimer = DISPLAY_TIMEOUT;
 bool displayOn = true;
 bool motionDetected = false;
+bool brightnessManualOverride = true;  // Manual brightness mode flag
+int manualBrightness = 4;               // Manual brightness value (1-15)
+
+// Display Schedule Configuration
+bool displayScheduleEnabled = true;    // Enable/disable scheduled on/off times
+int scheduleStartHour = 6;              // Turn on at 6:00 AM
+int scheduleStartMinute = 0;
+int scheduleEndHour = 5;               // Turn off at 5:00 PM
+int scheduleEndMinute = 0;
 
 // Timing
 unsigned long lastNTPUpdate = 0;
 unsigned long lastModeChange = 0;
-
-// ======================== MAX7219.H ========================
-// MAX7219 Commands
-#define CMD_NOOP   0
-#define CMD_DIGIT0 1
-#define CMD_DIGIT1 2
-#define CMD_DIGIT2 3
-#define CMD_DIGIT3 4
-#define CMD_DIGIT4 5
-#define CMD_DIGIT5 6
-#define CMD_DIGIT6 7
-#define CMD_DIGIT7 8
-#define CMD_DECODEMODE  9
-#define CMD_INTENSITY   10
-#define CMD_SCANLIMIT   11
-#define CMD_SHUTDOWN    12
-#define CMD_DISPLAYTEST 15
-
-byte scr[NUM_MAX * 8 + 8];
-
-void sendCmd(int addr, byte cmd, byte data) {
-  digitalWrite(CS_PIN, LOW);
-  for (int i = NUM_MAX - 1; i >= 0; i--) {
-    shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, i == addr ? cmd : 0);
-    shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, i == addr ? data : 0);
-  }
-  digitalWrite(CS_PIN, HIGH);
-}
-
-void sendCmdAll(byte cmd, byte data) {
-  digitalWrite(CS_PIN, LOW);
-  for (int i = NUM_MAX - 1; i >= 0; i--) {
-    shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, cmd);
-    shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, data);
-  }
-  digitalWrite(CS_PIN, HIGH);
-}
-
-void refresh(int addr) {
-  for (int i = 0; i < 8; i++)
-    sendCmd(addr, i + CMD_DIGIT0, scr[addr * 8 + i]);
-}
-
-void refreshAllRot270() {
-  byte mask = 0x01;
-  for (int c = 0; c < 8; c++) {
-    digitalWrite(CS_PIN, LOW);
-    for (int i = NUM_MAX - 1; i >= 0; i--) {
-      byte bt = 0;
-      for (int b = 0; b < 8; b++) {
-        bt <<= 1;
-        if (scr[i * 8 + b] & mask) bt |= 0x01;
-      }
-      shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, CMD_DIGIT0 + c);
-      shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, bt);
-    }
-    digitalWrite(CS_PIN, HIGH);
-    mask <<= 1;
-  }
-}
-
-void refreshAllRot90() {
-  byte mask = 0x80;
-  for (int c = 0; c < 8; c++) {
-    digitalWrite(CS_PIN, LOW);
-    for (int i = NUM_MAX - 1; i >= 0; i--) {
-      byte bt = 0;
-      for (int b = 0; b < 8; b++) {
-        bt >>= 1;
-        if (scr[i * 8 + b] & mask) bt |= 0x80;
-      }
-      shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, CMD_DIGIT0 + c);
-      shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, bt);
-    }
-    digitalWrite(CS_PIN, HIGH);
-    mask >>= 1;
-  }
-}
-
-void refreshAll() {
-#if ROTATE == 270
-  refreshAllRot270();
-#elif ROTATE == 90
-  refreshAllRot90();
-#else
-  for (int c = 0; c < 8; c++) {
-    digitalWrite(CS_PIN, LOW);
-    for (int i = NUM_MAX - 1; i >= 0; i--) {
-      shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, CMD_DIGIT0 + c);
-      shiftOut(DIN_PIN, CLK_PIN, MSBFIRST, scr[i * 8 + c]);
-    }
-    digitalWrite(CS_PIN, HIGH);
-  }
-#endif
-}
-
-void clr() {
-  for (int i = 0; i < NUM_MAX * 8; i++) scr[i] = 0;
-}
-
-void initMAX7219() {
-  pinMode(DIN_PIN, OUTPUT);
-  pinMode(CLK_PIN, OUTPUT);
-  pinMode(CS_PIN, OUTPUT);
-  digitalWrite(CS_PIN, HIGH);
-  sendCmdAll(CMD_DISPLAYTEST, 0);
-  sendCmdAll(CMD_SCANLIMIT, 7);
-  sendCmdAll(CMD_DECODEMODE, 0);
-  sendCmdAll(CMD_INTENSITY, 0);
-  sendCmdAll(CMD_SHUTDOWN, 0);
-  clr();
-  refreshAll();
-}
-
-// ======================== FONTS.H ========================
-
-const uint8_t digits5x16rn[] PROGMEM = {5, 16, '0', ':',
-  0x05, 0xFE, 0x7F, 0x01, 0x80, 0x01, 0x80, 0xFF, 0xFF, 0xFE, 0x7F,
-  0x04, 0x04, 0x00, 0x02, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
-  0x05, 0x02, 0xFF, 0x81, 0x80, 0x81, 0x80, 0xFF, 0x80, 0x7E, 0x80,
-  0x05, 0x02, 0x40, 0x81, 0x80, 0x81, 0x80, 0xFF, 0xFF, 0x7E, 0x7F,
-  0x05, 0xFF, 0x01, 0x00, 0x01, 0x00, 0x01, 0xFE, 0xFF, 0xFE, 0xFF,
-  0x05, 0xFF, 0x40, 0x81, 0x80, 0x81, 0x80, 0x81, 0xFF, 0x01, 0x7F,
-  0x05, 0xFE, 0x7F, 0x81, 0x80, 0x81, 0x80, 0x81, 0xFF, 0x02, 0x7F,
-  0x05, 0x01, 0x00, 0x01, 0xFC, 0xC1, 0xFF, 0xFF, 0x03, 0x3F, 0x00,
-  0x05, 0x7E, 0x7F, 0x81, 0x80, 0x81, 0x80, 0xFF, 0xFF, 0x7E, 0x7F,
-  0x05, 0x7E, 0x40, 0x81, 0x80, 0x81, 0x80, 0xFF, 0xFF, 0xFE, 0x7F,
-  0x01, 0x20, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-};
-
-const uint8_t digits5x8rn[] PROGMEM = {5, 8, ' ', ':',
-  0, 0, 0, 0, 0, 0,
-  1, B01011111, B00000000, B00000000, 0, 0,
-  3, B00000011, B00000000, B00000011, 0, 0,
-  3, B00000010, B01111111, B00000010, 0, 0,
-  3, B00100000, B01111111, B00100000, 0, 0,
-  3, B01100001, B00011100, B01000011, 0, 0,
-  0, 0, 0, 0, 0, 0,
-  1, B00000001, B00000000, B00000000, 0, 0,
-  2, B00111110, B01000001, B00000000, 0, 0,
-  2, B01000001, B00111110, B00000000, 0, 0,
-  0, 0, 0, 0, 0, 0,
-  5, B00001000, B00001000, B00111110, B00001000, B00001000,
-  2, B10000000, B01000000, B00000000, 0, 0,
-  5, B00001000, B00001000, B00001000, B00001000, B00001000,
-  1, B01000000, B00000000, B00000000, 0, 0,
-  3, B01100000, B00011100, B00000011, 0, 0,
-  0x05, 0x7E, 0x81, 0x81, 0xFF, 0x7E,
-  0x04, 0x04, 0x02, 0xFF, 0xFF, 0x00,
-  0x05, 0xF1, 0x89, 0x89, 0x8F, 0x86,
-  0x05, 0x81, 0x89, 0x89, 0xFF, 0x76,
-  0x05, 0x1F, 0x10, 0x10, 0xFE, 0xFE,
-  0x05, 0x8F, 0x89, 0x89, 0xF9, 0x71,
-  0x05, 0x7E, 0x89, 0x89, 0xF9, 0x70,
-  0x05, 0x01, 0xC1, 0xF1, 0x3F, 0x0F,
-  0x05, 0x76, 0x89, 0x89, 0xFF, 0x76,
-  0x05, 0x0E, 0x91, 0x91, 0xFF, 0x7E,
-  1, B00100100, B00000000, B00000000, B00000000, B00000000,
-};
-
-const uint8_t font3x7[] PROGMEM = {5, 7, ' ', '_',
-  0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x40, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x03, 0x7F, 0x41, 0x7F, 0x00, 0x00,
-  0x03, 0x04, 0x02, 0x7F, 0x00, 0x00,
-  0x03, 0x79, 0x49, 0x4F, 0x00, 0x00,
-  0x03, 0x41, 0x49, 0x7F, 0x00, 0x00,
-  0x03, 0x1F, 0x10, 0x7C, 0x00, 0x00,
-  0x03, 0x4F, 0x49, 0x79, 0x00, 0x00,
-  0x03, 0x7F, 0x49, 0x79, 0x00, 0x00,
-  0x03, 0x01, 0x71, 0x0F, 0x00, 0x00,
-  0x03, 0x7F, 0x49, 0x7F, 0x00, 0x00,
-  0x03, 0x4F, 0x49, 0x7F, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x03, 0x78, 0x24, 0x78, 0x00, 0x00,
-  0x03, 0x7C, 0x54, 0x28, 0x00, 0x00,
-  0x03, 0x38, 0x44, 0x44, 0x00, 0x00,
-  0x03, 0x7C, 0x44, 0x38, 0x00, 0x00,
-  0x03, 0x7C, 0x54, 0x44, 0x00, 0x00,
-  0x03, 0x7C, 0x14, 0x04, 0x00, 0x00,
-  0x03, 0x38, 0x44, 0x74, 0x00, 0x00,
-  0x03, 0x7C, 0x10, 0x7C, 0x00, 0x00,
-  0x01, 0x7C, 0x00, 0x00, 0x00, 0x00,
-  0x03, 0x44, 0x44, 0x3C, 0x00, 0x00,
-  0x03, 0x7C, 0x10, 0x6C, 0x00, 0x00,
-  0x03, 0x7C, 0x40, 0x40, 0x00, 0x00,
-  0x05, 0x78, 0x04, 0x38, 0x04, 0x78,
-  0x03, 0x7C, 0x04, 0x78, 0x00, 0x00,
-  0x03, 0x38, 0x44, 0x38, 0x00, 0x00,
-  0x03, 0x7C, 0x24, 0x18, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x03, 0x7C, 0x24, 0x58, 0x00, 0x00,
-  0x03, 0x48, 0x54, 0x24, 0x00, 0x00,
-  0x03, 0x04, 0x7C, 0x04, 0x00, 0x00,
-  0x03, 0x3C, 0x40, 0x7C, 0x00, 0x00,
-  0x03, 0x3C, 0x40, 0x3C, 0x00, 0x00,
-  0x05, 0x3C, 0x40, 0x38, 0x40, 0x3C,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x03, 0x1C, 0x70, 0x1C, 0x00, 0x00,
-  0x03, 0x64, 0x54, 0x4C, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-const uint8_t digits3x5[] PROGMEM = {3, 5, '0', '9',
-  0x03, 0xF8, 0x88, 0xF8,
-  0x03, 0, 0x10, 0xF8,
-  0x03, 0xE8, 0xA8, 0xB8,
-  0x03, 0x88, 0xA8, 0xF8,
-  0x03, 0x38, 0x20, 0xF8,
-  0x03, 0xB8, 0xA8, 0xE8,
-  0x03, 0xF8, 0xA8, 0xE8,
-  0x03, 0x08, 0x08, 0xF8,
-  0x03, 0xF8, 0xA8, 0xF8,
-  0x03, 0xB8, 0xA8, 0xF8,
-};
 
 // ======================== FONT HELPER FUNCTIONS ========================
 
@@ -778,6 +566,24 @@ void updateSensorData() {
 
 // ======================== BRIGHTNESS & MOTION ========================
 
+bool isWithinScheduleWindow() {
+  if (!displayScheduleEnabled) return true;  // Schedule disabled, always within window
+  
+  // Convert current time to minutes since midnight
+  int currentMinutes = hours * 60 + minutes;
+  int scheduleStartMinutes = scheduleStartHour * 60 + scheduleStartMinute;
+  int scheduleEndMinutes = scheduleEndHour * 60 + scheduleEndMinute;
+  
+  // Handle case where schedule spans midnight (e.g., 10 PM to 6 AM)
+  if (scheduleStartMinutes <= scheduleEndMinutes) {
+    // Normal case: start < end (e.g., 6 AM to 11 PM)
+    return currentMinutes >= scheduleStartMinutes && currentMinutes < scheduleEndMinutes;
+  } else {
+    // Schedule spans midnight: start > end (e.g., 11 PM to 6 AM)
+    return currentMinutes >= scheduleStartMinutes || currentMinutes < scheduleEndMinutes;
+  }
+}
+
 void handleBrightnessAndMotion() {
   // Read ambient light
   lightLevel = analogRead(LDR_PIN);
@@ -788,19 +594,31 @@ void handleBrightnessAndMotion() {
   // Check motion
   motionDetected = digitalRead(PIR_PIN);
   
-  if (motionDetected) {
-    // Motion detected - turn on and reset timer
+  // Check if within schedule window
+  bool withinSchedule = isWithinScheduleWindow();
+  
+  if (withinSchedule && motionDetected) {
+    // Motion detected and within schedule - turn on and reset timer
     displayTimer = DISPLAY_TIMEOUT;
     displayOn = true;
-    brightness = ambientBrightness;
+    // Use manual brightness if override is enabled, otherwise use ambient
+    brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
     sendCmdAll(CMD_SHUTDOWN, 1);
     sendCmdAll(CMD_INTENSITY, brightness);
+  } else if (!withinSchedule) {
+    // Outside schedule window - force display off
+    if (displayOn) {
+      displayOn = false;
+      sendCmdAll(CMD_SHUTDOWN, 0);
+    }
+    displayTimer = 0;
   } else {
-    // No motion - countdown
+    // Within schedule but no motion - countdown
     if (displayTimer > 0) {
       displayTimer--;
-      // Fade out gradually
-      brightness = map(displayTimer, 0, DISPLAY_TIMEOUT, 1, ambientBrightness);
+      // Fade out gradually (respect manual override if set)
+      int targetBrightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
+      brightness = map(displayTimer, 0, DISPLAY_TIMEOUT, 1, targetBrightness);
       sendCmdAll(CMD_INTENSITY, brightness);
     } else {
       // Timer expired - turn off
@@ -822,30 +640,161 @@ void setupWebServer() {
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
     html += "<style>body{font-family:Arial;margin:20px;background:#f0f0f0;}";
     html += ".card{background:white;padding:20px;margin:10px;border-radius:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}";
-    html += "h1{color:#333;}</style></head><body>";
+    html += "h1{color:#333;}</style>";
+    html += "<script>";
+    html += "function updateTime() {";
+    html += "  fetch('/api/time').then(r => r.json()).then(d => {";
+    html += "    document.getElementById('time-display').innerText = d.time;";
+    html += "    document.getElementById('date-display').innerText = d.date;";
+    html += "  });";
+    html += "}";
+    html += "function updateStatus() {";
+    html += "  fetch('/api/status').then(r => r.json()).then(d => {";
+    html += "    document.getElementById('display-status').innerText = d.display;";
+    html += "    document.getElementById('motion-status').innerText = d.motion;";
+    html += "    document.getElementById('brightness-status').innerText = d.brightness + '/15';";
+    html += "    document.getElementById('light-status').innerText = d.light;";
+    html += "    document.getElementById('brightness-mode').innerText = d.mode;";
+    html += "    let scheduleNotice = document.getElementById('schedule-notice');";
+    html += "    if (d.schedule_disabled || d.outside_schedule) {";
+    html += "      scheduleNotice.style.display = 'block';";
+    html += "      scheduleNotice.innerText = d.outside_schedule ? 'Display OFF: Outside scheduled hours (' + d.schedule_start + '-' + d.schedule_end + ')' : 'Schedule: Disabled';";
+    html += "    } else {";
+    html += "      scheduleNotice.style.display = 'none';";
+    html += "    }";
+    html += "  });";
+    html += "}";
+    html += "setInterval(updateTime, 1000);";
+    html += "</script>";
+    html += "</head><body>";
     html += "<h1>LED Matrix Clock</h1>";
-    html += "<div class='card'><h2>Current Time</h2>";
-    html += "<p style='font-size:24px;'>" + String(hours) + ":" + 
+    html += "<div class='card'><h2>Current Time & Environment</h2>";
+    html += "<p style='font-size:24px;' id='time-display'>" + String(hours) + ":" + 
             (minutes < 10 ? "0" : "") + String(minutes) + ":" +
             (seconds < 10 ? "0" : "") + String(seconds) + "</p>";
-    html += "<p>" + String(day) + "/" + String(month) + "/" + String(year) + "</p></div>";
+    html += "<p id='date-display'>" + String(day) + "/" + String(month) + "/" + String(year) + "</p>";
     
     if (sensorAvailable) {
-      html += "<div class='card'><h2>Environment</h2>";
-      html += "<p>Temperature: " + String(temperature) + "°C</p>";
-      html += "<p>Humidity: " + String(humidity) + "%</p></div>";
+      html += "<p>Temperature: " + String(temperature) + "°C | Humidity: " + String(humidity) + "%</p>";
     }
+    html += "</div>";
     
     html += "<div class='card'><h2>Status</h2>";
-    html += "<p>Display: " + String(displayOn ? "ON" : "OFF") + "</p>";
-    html += "<p>Motion: " + String(motionDetected ? "Detected" : "None") + "</p>";
-    html += "<p>Brightness: " + String(brightness) + "/15</p>";
-    html += "<p>Light Level: " + String(lightLevel) + "</p></div>";
+    html += "<p style='color:red;font-weight:bold;' id='schedule-notice' style='display:none;'></p>";
+    html += "<p>Display: <span id='display-status'>" + String(displayOn ? "ON" : "OFF") + "</span></p>";
+    html += "<p>Motion: <span id='motion-status'>" + String(motionDetected ? "Detected" : "None") + "</span></p>";
+    html += "<p>Current Brightness: <span id='brightness-status'>" + String(brightness) + "/15</span></p>";
+    html += "<p>Light Level: <span id='light-status'>" + String(lightLevel) + "</span></p></div>";
+    
+    html += "<div class='card'><h2>Brightness Control</h2>";
+    html += "<p>Mode: <span id='brightness-mode'>" + String(brightnessManualOverride ? "Manual" : "Auto") + "</span></p>";
+    if (brightnessManualOverride) {
+      html += "<p><label>Manual Brightness: <input type='range' min='1' max='15' value='" + String(manualBrightness) + "' onchange=\"fetch('/brightness?value=' + this.value).then(() => updateStatus())\"></label></p>";
+    }
+    html += "<p><a href='/brightness?mode=toggle'>Toggle Auto/Manual</a></p></div>";
+    
+    html += "<div class='card'><h2>Display Schedule</h2>";
+    html += "<form method='POST' action='/schedule'>";
+    html += "<p><label><input type='checkbox' name='enabled' value='1' " + String(displayScheduleEnabled ? "checked" : "") + "> Enable Schedule</label></p>";
+    html += "<p><label>Turn On: <input type='number' name='start_hour' min='0' max='23' value='" + String(scheduleStartHour) + "' style='width:50px;'>:";
+    html += "<input type='number' name='start_min' min='0' max='59' value='" + String(scheduleStartMinute < 10 ? "0" : "") + String(scheduleStartMinute) + "' style='width:50px;'></label></p>";
+    html += "<p><label>Turn Off: <input type='number' name='end_hour' min='0' max='23' value='" + String(scheduleEndHour) + "' style='width:50px;'>:";
+    html += "<input type='number' name='end_min' min='0' max='59' value='" + String(scheduleEndMinute < 10 ? "0" : "") + String(scheduleEndMinute) + "' style='width:50px;'></label></p>";
+    html += "<p><button type='submit'>Save Schedule</button></p>";
+    html += "</form></div>";
     
     html += "<div class='card'><p><a href='/reset'>Reset WiFi Settings</a></p></div>";
     html += "</body></html>";
     
     server.send(200, "text/html", html);
+  });
+  
+  // API endpoint for time data (JSON)
+  server.on("/api/time", []() {
+    String json = "{\"time\":\"";
+    json += String(hours) + ":";
+    json += (minutes < 10 ? "0" : "") + String(minutes) + ":";
+    json += (seconds < 10 ? "0" : "") + String(seconds);
+    json += "\",\"date\":\"";
+    json += String(day) + "/" + String(month) + "/" + String(year);
+    json += "\"}";
+    server.send(200, "application/json", json);
+  });
+  
+  // API endpoint for status data (JSON)
+  server.on("/api/status", []() {
+    bool withinSchedule = isWithinScheduleWindow();
+    String json = "{\"display\":\"";
+    json += String(displayOn ? "ON" : "OFF");
+    json += "\",\"motion\":\"";
+    json += String(motionDetected ? "Detected" : "None");
+    json += "\",\"brightness\":";
+    json += String(brightness);
+    json += ",\"light\":";
+    json += String(lightLevel);
+    json += ",\"mode\":\"";
+    json += String(brightnessManualOverride ? "Manual" : "Auto");
+    json += "\",\"schedule_disabled\":";
+    json += String(!displayScheduleEnabled ? "true" : "false");
+    json += ",\"outside_schedule\":";
+    json += String(!withinSchedule ? "true" : "false");
+    json += ",\"schedule_start\":\"";
+    json += (scheduleStartHour < 10 ? "0" : "") + String(scheduleStartHour) + ":";
+    json += (scheduleStartMinute < 10 ? "0" : "") + String(scheduleStartMinute);
+    json += "\",\"schedule_end\":\"";
+    json += (scheduleEndHour < 10 ? "0" : "") + String(scheduleEndHour) + ":";
+    json += (scheduleEndMinute < 10 ? "0" : "") + String(scheduleEndMinute);
+    json += "\"}";
+    server.send(200, "application/json", json);
+  });
+  
+  // Brightness control endpoint
+  server.on("/brightness", []() {
+    if (server.hasArg("mode")) {
+      // Toggle auto/manual mode
+      brightnessManualOverride = !brightnessManualOverride;
+      DEBUG(Serial.printf("Brightness mode: %s\n", brightnessManualOverride ? "Manual" : "Auto"));
+      // Redirect to home page to refresh and show change
+      server.sendHeader("Location", "/");
+      server.send(302, "text/plain", "");
+      return;
+    }
+    if (server.hasArg("value")) {
+      // Set manual brightness
+      int newBrightness = server.arg("value").toInt();
+      manualBrightness = constrain(newBrightness, 1, 15);
+      brightness = manualBrightness;
+      sendCmdAll(CMD_INTENSITY, brightness);
+      DEBUG(Serial.printf("Manual brightness set to: %d\n", manualBrightness));
+    }
+    server.send(200, "text/plain", "OK");
+  });
+  
+  // Schedule configuration endpoint
+  server.on("/schedule", HTTP_POST, []() {
+    displayScheduleEnabled = server.hasArg("enabled");
+    
+    if (server.hasArg("start_hour")) {
+      scheduleStartHour = constrain(server.arg("start_hour").toInt(), 0, 23);
+    }
+    if (server.hasArg("start_min")) {
+      scheduleStartMinute = constrain(server.arg("start_min").toInt(), 0, 59);
+    }
+    if (server.hasArg("end_hour")) {
+      scheduleEndHour = constrain(server.arg("end_hour").toInt(), 0, 23);
+    }
+    if (server.hasArg("end_min")) {
+      scheduleEndMinute = constrain(server.arg("end_min").toInt(), 0, 59);
+    }
+    
+    DEBUG(Serial.printf("Schedule updated - Enabled: %s, Start: %02d:%02d, End: %02d:%02d\n",
+                        displayScheduleEnabled ? "Yes" : "No", 
+                        scheduleStartHour, scheduleStartMinute,
+                        scheduleEndHour, scheduleEndMinute));
+    
+    // Redirect to home page to refresh
+    server.sendHeader("Location", "/");
+    server.send(302, "text/plain", "");
   });
   
   // Reset WiFi
