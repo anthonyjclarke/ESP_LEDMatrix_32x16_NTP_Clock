@@ -7,39 +7,59 @@
  * 
  * =========================== TODO ==========================
  * - Enable switching between 12/24 hour formats
- * - Switch between Celsius/Fahrenheit
  * - Switch between different timezones via web interface
  * - Switch LDR sensitivity via web interface and On/Off
- * - Implement web interface for full configuration
+ * - get weather from online API and display on matrix and webpage using https://openweathermap.org/
  * - Add OTA firmware update capability
  * - tidy up web interface and combine all configuration into single page
  * - Fix Readme formatting
  * 
  * ======================== CHANGELOG ========================
  * 
- * v2.1 - 2025-12-15
- *  - Fixed display schedule end time variable initialization order
- *  - Enable Fahrenheit/Celsius toggle via web interface
- *  - Changed sensor to BME280 on 0x76, default for many modules is 0x77 so BE AWARE
- * 
- * 
- * 
- * 
+ * v2.1 - 15th December 2025
+    - Added visual light level indicator with gradient bar chart and dynamic icons
+    - Implemented emoji icons for light conditions: ☀️ (bright), ☁️ (medium), 🌙 (dark)
+    - Reversed light bar gradient to match LDR behavior (low=bright, high=dark)
+    - Merged Status and Configuration sections into unified "Status & Configuration" card
+    - Converted Display ON/OFF control to button format matching other controls
+    - Added Display Brightness mode indicator (Manual/Automatic) to Status section
+    - Moved brightness mode toggle from Configuration to Status section
+    - Changed Temperature Unit control to button format for consistency
+    - Reorganized layout with clear Status and Configuration subsections
+    - Enhanced visual consistency across all control elements
+    - Web UI reorganization: moved Light Level from Status to Current Time & Environment section
+    - Moved Current Brightness to Configuration > Brightness Control section
+    - Renamed Current Brightness to Display Brightness for clarity
+    - Enhanced time/date display with digital-style Orbitron font
+    - Added large 48px glowing green time display with LED clock aesthetic
+    - Added 28px blue date display with matching digital font styling
+    - Improved visual hierarchy and information grouping in web interface
+    - Replaced BMP280 sensor with BME280 for humidity support
+    - Added humidity display on LED matrix and web interface (T°C H%%)
+    - Added pressure reading to web interface display
+    - Fixed temperature/humidity/pressure display on webpage via API endpoint
+    - Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules) so BE AWARE
+    - Fixed character encoding issue on webpage (UTF-8 charset)
+    - Removed unused SHT3X sensor files from project
+    - Enhanced /api/status endpoint with sensor data (temperature, humidity, pressure)
+    - Updated JavaScript to dynamically display sensor readings
+  
+  
  * v2.0 - 2025-12-14
- *   - Web UI: replaced full-page refresh with AJAX updates for time and selective
- *     Status updates to eliminate flicker.
- *   - Web API: added `/api/time` and `/api/status` JSON endpoints.
- *   - Brightness: added manual brightness override with Auto/Manual toggle and
- *     a 1–15 slider in the web interface; `/brightness` endpoint to set/toggle.
- *   - Scheduling: added display schedule (enable, start/end times) with
- *     `/schedule` form + endpoint; display respects schedule and shows a
- *     schedule notification in the web Status card when off.
- *   - Display code: fixed `NUM_MAX` header-scope issue by reordering defines
- *     before `max7219.h` include; cleaned unused variables (`fwd`, `fht`).
- *   - UI: merged Current Time and Environment into a single card; added
- *     on-demand Status refresh when brightness changes.
- *   - Misc: improved debug output and added validation for schedule inputs.
- * 
+    - Web UI: replaced full-page refresh with AJAX updates for time and selective
+      Status updates to eliminate flicker.
+    - Web API: added `/api/time` and `/api/status` JSON endpoints.
+    - Brightness: added manual brightness override with Auto/Manual toggle and
+      a 1–15 slider in the web interface; `/brightness` endpoint to set/toggle.
+    - Scheduling: added display schedule (enable, start/end times) with
+      `/schedule` form + endpoint; display respects schedule and shows a
+      schedule notification in the web Status card when off.
+    - Display code: fixed `NUM_MAX` header-scope issue by reordering defines
+      before `max7219.h` include; cleaned unused variables (`fwd`, `fht`).
+    - UI: merged Current Time and Environment into a single card; added
+      on-demand Status refresh when brightness changes.
+    - Misc: improved debug output and added validation for schedule inputs.
+  
  * v1.1 - December 2025
     - Initial Github Repo
     - Migrated to PlatformIO
@@ -112,6 +132,45 @@
  * - 2025-12-14: Added Display Schedule web form with enable/disable, start/end time inputs.
  * - 2025-12-14: Added /schedule endpoint (POST) to handle display schedule configuration updates.
  * - 2025-12-14: Merged Current Time and Environment sections on web page into single card.
+ * - 2025-12-15: Replaced Adafruit_BMP280 with Adafruit_BME280 library for humidity support.
+ * - 2025-12-15: Updated sensor object from bmp280 to bme280 with humidity reading capability.
+ * - 2025-12-15: Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules).
+ * - 2025-12-15: Updated testSensor() to read and validate humidity from BME280.
+ * - 2025-12-15: Updated updateSensorData() to read humidity and validate against 0-100% range.
+ * - 2025-12-15: Changed LED matrix display from "T°C P[hPa]" to "T°C H[%]" format.
+ * - 2025-12-15: Replaced pressure with humidity in web interface sensor display.
+ * - 2025-12-15: Updated serial debug output to show humidity instead of pressure.
+ * - 2025-12-15: Added UTF-8 charset meta tag to HTML head for proper character encoding.
+ * - 2025-12-15: Replaced degree symbol with HTML entity (&deg;) in all webpage outputs.
+ * - 2025-12-15: Enhanced /api/status endpoint with temperature, humidity, pressure, and sensor_available fields.
+ * - 2025-12-15: Updated updateStatus() JavaScript function to display sensor data from API.
+ * - 2025-12-15: Added sensor-data element to HTML for dynamic sensor reading updates.
+ * - 2025-12-15: Removed unused WEMOS_SHT3X.cpp and WEMOS_SHT3X.h files from project.
+ * - 2025-12-15: Reorganized web interface layout - moved Light Level from Status to Current Time & Environment section.
+ * - 2025-12-15: Moved Current Brightness from Status section to Configuration > Brightness Control section.
+ * - 2025-12-15: Renamed Current Brightness to Display Brightness for improved clarity.
+ * - 2025-12-15: Added Google Fonts Orbitron font family for digital-style time/date display.
+ * - 2025-12-15: Enhanced time display with 48px font size, green color, and glowing text shadow effect.
+ * - 2025-12-15: Enhanced date display with 28px font size and blue color using Orbitron font.
+ * - 2025-12-15: Added CSS classes .digital-time and .digital-date for consistent digital clock styling.
+ * - 2025-12-15: Added visual light level bar chart with gradient fill (0-100% based on LDR reading).
+ * - 2025-12-15: Implemented dynamic emoji icons for light conditions (sun, cloud, moon).
+ * - 2025-12-15: Created CSS classes .light-container, .light-icon, .light-bar-bg, .light-bar-fill for light visualization.
+ * - 2025-12-15: Reversed light bar gradient from light-to-dark to match LDR behavior (low=bright, high=dark).
+ * - 2025-12-15: Updated icon logic so low LDR values show sun (bright), high values show moon (dark).
+ * - 2025-12-15: Modified JavaScript updateStatus() to dynamically update light bar width and icon.
+ * - 2025-12-15: Merged Status and Configuration sections into single "Status & Configuration" card.
+ * - 2025-12-15: Added Status and Configuration subsection headers (h3) for clear organization.
+ * - 2025-12-15: Converted Display ON/OFF link to button format with "Turn ON"/"Turn OFF" labels.
+ * - 2025-12-15: Added Display Brightness mode (Manual/Automatic) indicator to Status section.
+ * - 2025-12-15: Moved brightness mode toggle button from Configuration to Status section.
+ * - 2025-12-15: Changed Brightness Control from h3 to h4 level heading under Configuration.
+ * - 2025-12-15: Converted Temperature Unit control from link to button format.
+ * - 2025-12-15: Changed Temperature Unit from h3 to h4 level heading under Configuration.
+ * - 2025-12-15: Updated temperature toggle button text to "Switch to Celsius"/"Switch to Fahrenheit".
+ * - 2025-12-15: Changed Display Schedule from h3 to h4 level heading under Configuration.
+ * - 2025-12-15: Removed redundant brightness-mode span element from Configuration section.
+ * - 2025-12-15: Updated JavaScript to use brightness-mode-status for Status section updates.
  */
 
 #include <Arduino.h>
@@ -216,6 +275,8 @@ bool sensorAvailable = false;
 // Display Control
 int brightness = 8;
 int lightLevel = 512;
+int previousLightLevel = 512;    // Track previous light level for change detection
+bool lightLevelChanged = false;  // Flag to trigger webpage refresh on significant light change
 int displayTimer = DISPLAY_TIMEOUT;
 bool displayOn = true;
 bool motionDetected = false;
@@ -652,6 +713,15 @@ void handleBrightnessAndMotion() {
   // Read ambient light
   lightLevel = analogRead(LDR_PIN);
   
+  // Check if light level has changed by ±5%
+  int lightDifference = abs(lightLevel - previousLightLevel);
+  int changeThreshold = (previousLightLevel > 0) ? (previousLightLevel * 5 / 100) : 51;  // 5% of previous level, minimum 51
+  if (lightDifference >= changeThreshold) {
+    lightLevelChanged = true;
+    DEBUG(Serial.printf("Light level changed: %d -> %d (diff: %d, threshold: %d)\n", previousLightLevel, lightLevel, lightDifference, changeThreshold));
+  }
+  previousLightLevel = lightLevel;  // Always update for next comparison
+  
   // Map to brightness (inverted: darker = dimmer)
   int ambientBrightness = 15 - map(constrain(lightLevel, 0, 1023), 0, 1023, 1, 15);
   
@@ -719,9 +789,17 @@ void setupWebServer() {
     String html = "<html><head><title>LED Clock</title>";
     html += "<meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    html += "<link href='https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap' rel='stylesheet'>";
     html += "<style>body{font-family:Arial;margin:20px;background:#f0f0f0;}";
     html += ".card{background:white;padding:20px;margin:10px;border-radius:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}";
-    html += "h1{color:#333;}</style>";
+    html += "h1{color:#333;}";
+    html += ".digital-time{font-family:'Orbitron',monospace;font-size:48px;font-weight:900;color:#00ff00;text-shadow:0 0 10px #00ff00;letter-spacing:0.1em;margin:10px 0;}";
+    html += ".digital-date{font-family:'Orbitron',monospace;font-size:28px;font-weight:700;color:#0080ff;letter-spacing:0.05em;margin:10px 0;}";
+    html += ".light-container{display:flex;align-items:center;gap:10px;margin:10px 0;}";
+    html += ".light-icon{font-size:24px;min-width:30px;text-align:center;}";
+    html += ".light-bar-bg{flex-grow:1;height:30px;background:#e0e0e0;border-radius:15px;overflow:hidden;position:relative;}";
+    html += ".light-bar-fill{height:100%;background:linear-gradient(90deg,#fff9c4 0%,#ffeb3b 50%,#1a1a1a 100%);transition:width 0.3s ease;border-radius:15px;}";
+    html += ".light-value{min-width:60px;font-weight:bold;text-align:right;}</style>";
     html += "<script>";
     html += "function updateTime() {";
     html += "  fetch('/api/time').then(r => r.json()).then(d => {";
@@ -735,7 +813,11 @@ void setupWebServer() {
     html += "    document.getElementById('motion-status').innerText = d.motion;";
     html += "    document.getElementById('brightness-status').innerText = d.brightness + '/15';";
     html += "    document.getElementById('light-status').innerText = d.light;";
-    html += "    document.getElementById('brightness-mode').innerText = d.mode;";
+    html += "    let lightPercent = Math.round((d.light / 1023) * 100);";
+    html += "    document.getElementById('light-bar').style.width = lightPercent + '%';";
+    html += "    let icon = d.light > 680 ? '🌙' : (d.light > 340 ? '☁️' : '☀️');";
+    html += "    document.getElementById('light-icon').innerText = icon;";
+    html += "    document.getElementById('brightness-mode-status').innerText = d.mode === 'Manual' ? 'Manual' : 'Automatic';";
     html += "    document.getElementById('temp-unit-display').innerText = d.temp_unit;";
     html += "    if (d.sensor_available) {";
     html += "      document.getElementById('sensor-data').innerHTML = 'Temperature: ' + d.temperature + '&deg; | Humidity: ' + d.humidity + '% | Pressure: ' + d.pressure + ' hPa';";
@@ -749,17 +831,23 @@ void setupWebServer() {
     html += "    }";
     html += "  });";
     html += "}";
+    html += "function checkLightChange() {";
+    html += "  fetch('/api/light-change').then(r => r.json()).then(d => {";
+    html += "    if (d.light_changed) {";
+    html += "      updateStatus();";
+    html += "    }";
     html += "  });";
     html += "}";
+    html += "setInterval(checkLightChange, 2000);";
     html += "setInterval(updateTime, 1000);";
     html += "</script>";
     html += "</head><body>";
     html += "<h1>LED Matrix Clock</h1>";
     html += "<div class='card'><h2>Current Time & Environment</h2>";
-    html += "<p style='font-size:24px;' id='time-display'>" + String(hours) + ":" + 
+    html += "<p class='digital-time' id='time-display'>" + String(hours) + ":" + 
             (minutes < 10 ? "0" : "") + String(minutes) + ":" +
             (seconds < 10 ? "0" : "") + String(seconds) + "</p>";
-    html += "<p id='date-display'>" + String(day) + "/" + String(month) + "/" + String(year) + "</p>";
+    html += "<p class='digital-date' id='date-display'>" + String(day) + "/" + String(month) + "/" + String(year) + "</p>";
     
     if (sensorAvailable) {
       int displayTemp = getDisplayTemperature();
@@ -768,35 +856,53 @@ void setupWebServer() {
     } else {
       html += "<p id='sensor-data'>Sensor not available</p>";
     }
+    
+    // Light level bar chart with icons (reversed: low=bright, high=dark)
+    int lightPercent = map(lightLevel, 0, 1023, 0, 100);
+    html += "<div class='light-container'>";
+    html += "<span class='light-icon' id='light-icon'>" + String(lightLevel > 680 ? "🌙" : (lightLevel > 340 ? "☁️" : "☀️")) + "</span>";
+    html += "<div class='light-bar-bg'>";
+    html += "<div class='light-bar-fill' id='light-bar' style='width:" + String(lightPercent) + "%'></div>";
+    html += "</div>";
+    html += "<span class='light-value' id='light-status'>" + String(lightLevel) + "</span>";
+    html += "</div>";
     html += "</div>";
     
-    html += "<div class='card'><h2>Status</h2>";
+    html += "<div class='card'><h2>Status &amp; Configuration</h2>";
     html += "<p style='color:red;font-weight:bold;' id='schedule-notice' style='display:none;'></p>";
-    html += "<p>Display: <span id='display-status'>" + String(displayOn ? "ON" : "OFF") + "</span></p>";
-    html += "<p><a href='/display?mode=toggle'>Toggle Display ON/OFF</a></p>";
-    html += "<p>Motion: <span id='motion-status'>" + String(motionDetected ? "Detected" : "None") + "</span></p>";
-    html += "<p>Current Brightness: <span id='brightness-status'>" + String(brightness) + "/15</span></p>";
-    html += "<p>Light Level: <span id='light-status'>" + String(lightLevel) + "</span></p></div>";
     
-    html += "<div class='card'><h2>Configuration</h2>";
+    // Status items
+    html += "<h3 style='margin-top:0;'>Status</h3>";
+    html += "<p>Display: <span id='display-status'>" + String(displayOn ? "ON" : "OFF") + "</span> ";
+    html += "<button onclick=\"fetch('/display?mode=toggle').then(() => location.reload())\" style='padding:5px 10px;cursor:pointer;'>";
+    html += String(displayOn ? "Turn OFF" : "Turn ON");
+    html += "</button></p>";
+    html += "<p>Motion: <span id='motion-status'>" + String(motionDetected ? "Detected" : "None") + "</span></p>";
+    html += "<p>Display Brightness: <span id='brightness-mode-status'>" + String(brightnessManualOverride ? "Manual" : "Automatic") + "</span> ";
+    html += "<button onclick=\"fetch('/brightness?mode=toggle').then(() => location.reload())\" style='padding:5px 10px;cursor:pointer;'>";
+    html += String(brightnessManualOverride ? "Switch to Auto" : "Switch to Manual");
+    html += "</button></p>";
+    
+    // Configuration items
+    html += "<hr style='margin:15px 0;'>";
+    html += "<h3>Configuration</h3>";
     
     // Brightness Control Section
-    html += "<h3 style='margin-top:0;'>Brightness Control</h3>";
-    html += "<p>Mode: <span id='brightness-mode'>" + String(brightnessManualOverride ? "Manual" : "Auto") + "</span></p>";
+    html += "<h4 style='margin-top:10px;margin-bottom:5px;'>Brightness Control</h4>";
+    html += "<p>Display Brightness: <span id='brightness-status'>" + String(brightness) + "/15</span></p>";
     if (brightnessManualOverride) {
       html += "<p><label>Manual Brightness: <input type='range' min='1' max='15' value='" + String(manualBrightness) + "' onchange=\"fetch('/brightness?value=' + this.value).then(() => updateStatus())\"></label></p>";
     }
-    html += "<p><a href='/brightness?mode=toggle'>Toggle Auto/Manual</a></p>";
     
     // Temperature Unit Section
-    html += "<hr style='margin:15px 0;'>";
-    html += "<h3>Temperature Unit</h3>";
-    html += "<p>Current Unit: <span id='temp-unit-display'>" + String(useFahrenheit ? "Fahrenheit (°F)" : "Celsius (°C)") + "</span></p>";
-    html += "<p><a href='/temperature?mode=toggle'>Toggle to " + String(useFahrenheit ? "Celsius" : "Fahrenheit") + "</a></p>";
+    html += "<h4 style='margin-top:15px;margin-bottom:5px;'>Temperature Unit</h4>";
+    html += "<p>Current Unit: <span id='temp-unit-display'>" + String(useFahrenheit ? "Fahrenheit (&deg;F)" : "Celsius (&deg;C)") + "</span> ";
+    html += "<button onclick=\"fetch('/temperature?mode=toggle').then(() => location.reload())\" style='padding:5px 10px;cursor:pointer;'>";
+    html += String(useFahrenheit ? "Switch to Celsius" : "Switch to Fahrenheit");
+    html += "</button></p>";
     
     // Display Schedule Section
-    html += "<hr style='margin:15px 0;'>";
-    html += "<h3>Display Schedule</h3>";
+    html += "<h4 style='margin-top:15px;margin-bottom:5px;'>Display Schedule</h4>";
     html += "<form method='POST' action='/schedule'>";
     html += "<p><label><input type='checkbox' name='enabled' value='1' " + String(displayScheduleEnabled ? "checked" : "") + "> Enable Schedule</label></p>";
     html += "<p><label>Turn On: <input type='number' name='start_hour' min='0' max='23' value='" + String(scheduleStartHour) + "' style='width:50px;'>:";
@@ -825,6 +931,14 @@ void setupWebServer() {
   });
   
   // API endpoint for status data (JSON)
+  server.on("/api/light-change", []() {
+    String json = "{\"light_changed\":" + String(lightLevelChanged ? "true" : "false") + "}";
+    if (lightLevelChanged) {
+      lightLevelChanged = false;  // Reset flag after reading
+    }
+    server.send(200, "application/json", json);
+  });
+  
   server.on("/api/status", []() {
     bool withinSchedule = isWithinScheduleWindow();
     int displayTemp = getDisplayTemperature();

@@ -10,11 +10,40 @@ Libraries:
 
 	neptune2/simpleDSTadjust
 
-    Wemos SHT3x - https://github.com/wemos/WEMOS_SHT3x_Arduino_Library
+	adafruit/Adafruit BME280 Library
+
+	adafruit/Adafruit Unified Sensor
 
 =========================== CHANGELOG ==========================
 
-v2.1 - 15th December 2025
+ v2.1 - 15th December 2025
+    - Added visual light level indicator with gradient bar chart and dynamic icons
+    - Implemented emoji icons for light conditions: ☀️ (bright), ☁️ (medium), 🌙 (dark)
+    - Reversed light bar gradient to match LDR behavior (low=bright, high=dark)
+    - Merged Status and Configuration sections into unified "Status & Configuration" card
+    - Converted Display ON/OFF control to button format matching other controls
+    - Added Display Brightness mode indicator (Manual/Automatic) to Status section
+    - Moved brightness mode toggle from Configuration to Status section
+    - Changed Temperature Unit control to button format for consistency
+    - Reorganized layout with clear Status and Configuration subsections
+    - Enhanced visual consistency across all control elements
+    - Web UI reorganization: moved Light Level from Status to Current Time & Environment section
+    - Moved Current Brightness to Configuration > Brightness Control section
+    - Renamed Current Brightness to Display Brightness for clarity
+    - Enhanced time/date display with digital-style Orbitron font
+    - Added large 48px glowing green time display with LED clock aesthetic
+    - Added 28px blue date display with matching digital font styling
+    - Improved visual hierarchy and information grouping in web interface
+    - Replaced BMP280 sensor with BME280 for humidity support
+    - Added humidity display on LED matrix and web interface (T°C H%%)
+    - Added pressure reading to web interface display
+    - Fixed temperature/humidity/pressure display on webpage via API endpoint
+    - Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules) so BE AWARE
+    - Fixed character encoding issue on webpage (UTF-8 charset)
+    - Removed unused SHT3X sensor files from project
+    - Enhanced /api/status endpoint with sensor data (temperature, humidity, pressure)
+    - Updated JavaScript to dynamically display sensor readings
+  
 
 v2.0 - 14th December 2025
     - Added AJAX-based web interface with flicker-free updates
@@ -52,11 +81,12 @@ ESP8266 (NodeMCU 1.0 or D1 Mini)
   GND  -> GND
   Note: Add 100-470µF capacitor between VCC and GND
 
-SHT30 Temperature/Humidity Sensor (I2C):
-  VCC  -> 3.3V ⚠️ IMPORTANT: Use 3.3V NOT 5V!
+BME280 Temperature/Humidity/Pressure Sensor (I2C):
+  VCC  -> 3.3V
   GND  -> GND
   SDA  -> D2 (GPIO4)
   SCL  -> D1 (GPIO5)
+  ⚠️  NOTE: I2C Address is 0x76 (common for many modules; default is 0x77)
 
 PIR Motion Sensor:
   VCC  -> 5V
