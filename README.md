@@ -16,58 +16,36 @@ Libraries:
 
 =========================== CHANGELOG ==========================
 
+ v2.5 - 16th December 2025
+    - Light indicator behavior now matches the LDR (dark -> short bar, reversed gradient, static 🌙/☀️ icons) and the raw reading was removed.
+    - Digital time display enlarged to 72px for better readability on any screen.
+    - Temperature unit labels now render the true ° symbol, append °C/°F to live data, and expose a short unit code in `/api/status`.
+
+ v2.4 - 15th December 2025
+    - Migrated from simpleDSTadjust to TZ.h with full POSIX timezone strings and 88 predefined regions plus custom TZ documentation.
+    - Added timezone dropdown with `/timezone` endpoint, automatic NTP re-sync, expanded debug output, and default-enabled schedule handling.
+
+ v2.3 - 15th December 2025
+    - Overhauled the Status & Configuration card with emoji light indicator, buttonized controls, and clearer brightness/mode messaging.
+    - Reversed the light bar gradient to match sensor behavior and improved overall UI consistency.
+
+ v2.2 - 15th December 2025
+    - Reorganized the web UI: light level moved near the time, brightness controls clarified, and digital Orbitron styling applied to time/date.
+    - Added large glowing clock/date treatments to improve hierarchy.
+
  v2.1 - 15th December 2025
-    - Added visual light level indicator with gradient bar chart and dynamic icons
-    - Implemented emoji icons for light conditions: ☀️ (bright), ☁️ (medium), 🌙 (dark)
-    - Reversed light bar gradient to match LDR behavior (low=bright, high=dark)
-    - Merged Status and Configuration sections into unified "Status & Configuration" card
-    - Converted Display ON/OFF control to button format matching other controls
-    - Added Display Brightness mode indicator (Manual/Automatic) to Status section
-    - Moved brightness mode toggle from Configuration to Status section
-    - Changed Temperature Unit control to button format for consistency
-    - Reorganized layout with clear Status and Configuration subsections
-    - Enhanced visual consistency across all control elements
-    - Web UI reorganization: moved Light Level from Status to Current Time & Environment section
-    - Moved Current Brightness to Configuration > Brightness Control section
-    - Renamed Current Brightness to Display Brightness for clarity
-    - Enhanced time/date display with digital-style Orbitron font
-    - Added large 48px glowing green time display with LED clock aesthetic
-    - Added 28px blue date display with matching digital font styling
-    - Improved visual hierarchy and information grouping in web interface
-    - Replaced BMP280 sensor with BME280 for humidity support
-    - Added humidity display on LED matrix and web interface (T°C H%%)
-    - Added pressure reading to web interface display
-    - Fixed temperature/humidity/pressure display on webpage via API endpoint
-    - Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules) so BE AWARE
-    - Fixed character encoding issue on webpage (UTF-8 charset)
-    - Removed unused SHT3X sensor files from project
-    - Enhanced /api/status endpoint with sensor data (temperature, humidity, pressure)
-    - Updated JavaScript to dynamically display sensor readings
-  
+    - Swapped in the BME280 for humidity support, updated the web/API outputs, and fixed UTF-8/degree symbol handling.
+    - Added humidity/pressure readouts, removed unused sensor files, and improved sensor data streaming to the web UI.
 
-v2.0 - 14th December 2025
-    - Added AJAX-based web interface with flicker-free updates
-    - Implemented manual brightness control with Auto/Manual toggle (1-15 scale)
-    - Added display scheduling feature with configurable on/off times
-    - Introduced REST API endpoints for time, status, and control
-    - Fixed display initialization issues and cleaned up code structure
-    - Enhanced web UI with merged status cards and real-time updates
+ v2.0 - 14th December 2025
+    - Rebuilt the web UI around AJAX updates, added `/api/time` + `/api/status`, and introduced manual brightness + scheduling controls.
+    - Cleaned display initialization, added validation, and merged time/environment data into a single card for live updates.
 
-v1.1 - December 2025
-    - Initial Github Repo
-    - Migrated to PlatformIO
-    - Sensor Code NOT Fully tested, Clock / Date and Time working
+ v1.1 - December 2025
+    - Initial GitHub release under PlatformIO with WiFiManager setup; core clock/date functions operational while sensor stack stabilized.
 
-v1.0 - October 2025
-    Complete rewrite with modern practices (assisted by ChatGPT):
-    - WiFiManager for easy WiFi setup (no hardcoded credentials)
-    - SHT30 I2C temperature/humidity sensor
-    - Automatic NTP time synchronization with DST support
-    - PIR motion sensor for auto-off/on
-    - LDR for automatic brightness control
-    - Clean, well-structured code with proper error handling
-    - Comprehensive debug output
-    - Web interface for status
+ v1.0 - October 2025
+    - Complete modern rewrite featuring WiFiManager onboarding, BMP/BME280 sensing, NTP with DST, PIR-based auto-off, and LDR-driven brightness.
 
 ======================== HARDWARE SETUP ========================
 

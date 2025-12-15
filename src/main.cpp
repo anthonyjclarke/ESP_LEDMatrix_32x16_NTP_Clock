@@ -1,184 +1,200 @@
 #include "Arduino.h"
 
 /*
- * ESP8266 LED Matrix Clock - Modern Edition
- * Author: Rewritten from original by Anthony Clarke
- * Acknowledgements: Original by @cbm80amiga here - https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
- * 
- * =========================== TODO ==========================
- * - Enable switching between 12/24 hour formats
- * - Switch between different timezones via web interface
- * - Switch LDR sensitivity via web interface and On/Off
- * - get weather from online API and display on matrix and webpage using https://openweathermap.org/
- * - Add OTA firmware update capability
- * - tidy up web interface and combine all configuration into single page
- * - Fix Readme formatting
- * 
- * ======================== CHANGELOG ========================
- * 
- * v2.1 - 15th December 2025
-    - Added visual light level indicator with gradient bar chart and dynamic icons
-    - Implemented emoji icons for light conditions: ☀️ (bright), ☁️ (medium), 🌙 (dark)
-    - Reversed light bar gradient to match LDR behavior (low=bright, high=dark)
-    - Merged Status and Configuration sections into unified "Status & Configuration" card
-    - Converted Display ON/OFF control to button format matching other controls
-    - Added Display Brightness mode indicator (Manual/Automatic) to Status section
-    - Moved brightness mode toggle from Configuration to Status section
-    - Changed Temperature Unit control to button format for consistency
-    - Reorganized layout with clear Status and Configuration subsections
-    - Enhanced visual consistency across all control elements
-    - Web UI reorganization: moved Light Level from Status to Current Time & Environment section
-    - Moved Current Brightness to Configuration > Brightness Control section
-    - Renamed Current Brightness to Display Brightness for clarity
-    - Enhanced time/date display with digital-style Orbitron font
-    - Added large 48px glowing green time display with LED clock aesthetic
-    - Added 28px blue date display with matching digital font styling
-    - Improved visual hierarchy and information grouping in web interface
-    - Replaced BMP280 sensor with BME280 for humidity support
-    - Added humidity display on LED matrix and web interface (T°C H%%)
-    - Added pressure reading to web interface display
-    - Fixed temperature/humidity/pressure display on webpage via API endpoint
-    - Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules) so BE AWARE
-    - Fixed character encoding issue on webpage (UTF-8 charset)
-    - Removed unused SHT3X sensor files from project
-    - Enhanced /api/status endpoint with sensor data (temperature, humidity, pressure)
-    - Updated JavaScript to dynamically display sensor readings
-  
-  
- * v2.0 - 2025-12-14
-    - Web UI: replaced full-page refresh with AJAX updates for time and selective
-      Status updates to eliminate flicker.
-    - Web API: added `/api/time` and `/api/status` JSON endpoints.
-    - Brightness: added manual brightness override with Auto/Manual toggle and
-      a 1–15 slider in the web interface; `/brightness` endpoint to set/toggle.
-    - Scheduling: added display schedule (enable, start/end times) with
-      `/schedule` form + endpoint; display respects schedule and shows a
-      schedule notification in the web Status card when off.
-    - Display code: fixed `NUM_MAX` header-scope issue by reordering defines
-      before `max7219.h` include; cleaned unused variables (`fwd`, `fht`).
-    - UI: merged Current Time and Environment into a single card; added
-      on-demand Status refresh when brightness changes.
-    - Misc: improved debug output and added validation for schedule inputs.
-  
- * v1.1 - December 2025
-    - Initial Github Repo
-    - Migrated to PlatformIO
-    - Sensor Code NOT Fully tested, Clock / Date and Time working
-    - Move fonts to separate header file
-    - Moved MAX7219 functions to separate header file
-    - PlatformIO Version with WiFiManager
+ESP8266 LED Matrix Clock - Modern Edition
+Author: Rewritten from original by Anthony Clarke
+Acknowledgements: Original by @cbm80amiga here - https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
 
- * 
- * v1.0 - October 2025
- *        Complete rewrite with modern practices:
- *        - WiFiManager for easy WiFi setup (no hardcoded credentials)
- *        - BMP/BME280 I2C temperature/pressure/humidity sensor
- *        - Automatic NTP time synchronization with DST support
- *        - PIR motion sensor for auto-off/on
- *        - LDR for automatic brightness control
- *        - Clean, well-structured code with proper error handling
- *        - Comprehensive debug output
- *        - Web interface for status and configuration Status
- * 
- * ======================== HARDWARE SETUP ========================
- * 
- * ESP8266 (NodeMCU 1.0 or D1 Mini)
- * 
- * MAX7219 LED Matrix (32x16 - 8 modules):
- *   DIN  -> D8 (GPIO15)
- *   CS   -> D7 (GPIO13)
- *   CLK  -> D6 (GPIO12)
- *   VCC  -> 5V
- *   GND  -> GND
- *   Note: Add 100-470µF capacitor between VCC and GND
- * 
- * BMP/BME280 Temperature/Pressure/Humidity Sensor (I2C):
- *   VCC  -> 3.3V
- *   GND  -> GND
- *   SDA  -> D2 (GPIO4)
- *   SCL  -> D1 (GPIO5)
- *   Note: Supports BMP280 (temperature/pressure) or BME280 (temperature/pressure/humidity)
- * 
- * PIR Motion Sensor:
- *   VCC  -> 5V
- *   GND  -> GND
- *   OUT  -> D3 (GPIO0)
- * 
- * LDR (Light Sensor) Circuit:
- *   3.3V -> 10kΩ resistor -> A0 -> LDR -> GND
- *   Optional: 100nF capacitor across LDR
- * 
- * ==============================================================================================
+=========================== TODO ==========================
+- Enable switching between 12/24 hour formats
+- Switch between different timezones via web interface
+- Switch LDR sensitivity via web interface and On/Off
+- Get weather from online API and display on matrix and webpage using https://openweathermap.org/
+- Implement web interface for full configuration
+- Add OTA firmware update capability
+- Tidy up web interface and combine all configuration into single page
+- Fix Readme formatting
 
- * DETAILED CHANGELOG SUMMARY (Co-Pilot)
- * - 2025-10-XX: Initial rewrite and features (see header above for full changelog).
- * - 2025-12-13: Removed unused variable 'fwd' from font helper to fix compiler warnings.
- * - 2025-12-13: Removed unused variable 'fht' from `charWidth()` to fix compiler warning.
- * - 2025-12-13: Added concise changelog comments section at top of code.
- * - 2025-12-14: Moved NUM_MAX, LINE_WIDTH, ROTATE, and pin definitions before max7219.h include.
- * - 2025-12-14: Fixed NUM_MAX scope error in max7219.h by reordering includes/defines.
- * - 2025-12-14: Removed full-page refresh, replaced with JavaScript AJAX updates to eliminate flickering.
- * - 2025-12-14: Added /api/time endpoint for JSON time data (1-second refresh).
- * - 2025-12-14: Added /api/status endpoint for JSON status data (brightness, motion, display state).
- * - 2025-12-14: Added manual brightness override with Auto/Manual toggle in web interface.
- * - 2025-12-14: Added brightness slider (1-15) for manual brightness control.
- * - 2025-12-14: Status section now updates on-demand when brightness is changed.
- * - 2025-12-14: Added HTTP 302 redirect after brightness mode toggle to refresh page.
- * - 2025-12-14: Added display schedule configuration (start/end times, enable/disable flag).
- * - 2025-12-14: Added isWithinScheduleWindow() function for schedule validation.
- * - 2025-12-14: Updated handleBrightnessAndMotion() to respect display schedule times.
- * - 2025-12-14: Added schedule notification in web status section (shows when display is off due to schedule).
- * - 2025-12-14: Enhanced /api/status endpoint with schedule_disabled, outside_schedule, schedule_start/end fields.
- * - 2025-12-14: Added Display Schedule web form with enable/disable, start/end time inputs.
- * - 2025-12-14: Added /schedule endpoint (POST) to handle display schedule configuration updates.
- * - 2025-12-14: Merged Current Time and Environment sections on web page into single card.
- * - 2025-12-15: Replaced Adafruit_BMP280 with Adafruit_BME280 library for humidity support.
- * - 2025-12-15: Updated sensor object from bmp280 to bme280 with humidity reading capability.
- * - 2025-12-15: Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules).
- * - 2025-12-15: Updated testSensor() to read and validate humidity from BME280.
- * - 2025-12-15: Updated updateSensorData() to read humidity and validate against 0-100% range.
- * - 2025-12-15: Changed LED matrix display from "T°C P[hPa]" to "T°C H[%]" format.
- * - 2025-12-15: Replaced pressure with humidity in web interface sensor display.
- * - 2025-12-15: Updated serial debug output to show humidity instead of pressure.
- * - 2025-12-15: Added UTF-8 charset meta tag to HTML head for proper character encoding.
- * - 2025-12-15: Replaced degree symbol with HTML entity (&deg;) in all webpage outputs.
- * - 2025-12-15: Enhanced /api/status endpoint with temperature, humidity, pressure, and sensor_available fields.
- * - 2025-12-15: Updated updateStatus() JavaScript function to display sensor data from API.
- * - 2025-12-15: Added sensor-data element to HTML for dynamic sensor reading updates.
- * - 2025-12-15: Removed unused WEMOS_SHT3X.cpp and WEMOS_SHT3X.h files from project.
- * - 2025-12-15: Reorganized web interface layout - moved Light Level from Status to Current Time & Environment section.
- * - 2025-12-15: Moved Current Brightness from Status section to Configuration > Brightness Control section.
- * - 2025-12-15: Renamed Current Brightness to Display Brightness for improved clarity.
- * - 2025-12-15: Added Google Fonts Orbitron font family for digital-style time/date display.
- * - 2025-12-15: Enhanced time display with 48px font size, green color, and glowing text shadow effect.
- * - 2025-12-15: Enhanced date display with 28px font size and blue color using Orbitron font.
- * - 2025-12-15: Added CSS classes .digital-time and .digital-date for consistent digital clock styling.
- * - 2025-12-15: Added visual light level bar chart with gradient fill (0-100% based on LDR reading).
- * - 2025-12-15: Implemented dynamic emoji icons for light conditions (sun, cloud, moon).
- * - 2025-12-15: Created CSS classes .light-container, .light-icon, .light-bar-bg, .light-bar-fill for light visualization.
- * - 2025-12-15: Reversed light bar gradient from light-to-dark to match LDR behavior (low=bright, high=dark).
- * - 2025-12-15: Updated icon logic so low LDR values show sun (bright), high values show moon (dark).
- * - 2025-12-15: Modified JavaScript updateStatus() to dynamically update light bar width and icon.
- * - 2025-12-15: Merged Status and Configuration sections into single "Status & Configuration" card.
- * - 2025-12-15: Added Status and Configuration subsection headers (h3) for clear organization.
- * - 2025-12-15: Converted Display ON/OFF link to button format with "Turn ON"/"Turn OFF" labels.
- * - 2025-12-15: Added Display Brightness mode (Manual/Automatic) indicator to Status section.
- * - 2025-12-15: Moved brightness mode toggle button from Configuration to Status section.
- * - 2025-12-15: Changed Brightness Control from h3 to h4 level heading under Configuration.
- * - 2025-12-15: Converted Temperature Unit control from link to button format.
- * - 2025-12-15: Changed Temperature Unit from h3 to h4 level heading under Configuration.
- * - 2025-12-15: Updated temperature toggle button text to "Switch to Celsius"/"Switch to Fahrenheit".
- * - 2025-12-15: Changed Display Schedule from h3 to h4 level heading under Configuration.
- * - 2025-12-15: Removed redundant brightness-mode span element from Configuration section.
- * - 2025-12-15: Updated JavaScript to use brightness-mode-status for Status section updates.
- */
+======================== CHANGELOG ========================
+
+v2.5 - 15th December 2025
+  - Refined light level UI so the bar shrinks as ambient light readings rise and swapped the gradient to run from dark (moon) to bright (sun).
+  - Fixed light indicator layout by anchoring static 🌙/☀️ icons and removing the distracting raw LDR value readout.
+  - Increased the digital time font size by 50% (48px -> 72px) for better readability on desktops and mobile devices.
+  - Corrected the temperature unit label to render the real degree symbol and added dynamic °C/°F suffixes to the sensor data line.
+  - Extended /api/status with a compact `temp_unit_short` field so the web UI can show the currently selected unit next to live readings.
+
+v2.4 - 15th December 2025
+  - Replaced obsolete simpleDSTadjust library with modern TZ.h timezone support and implemented POSIX TZ strings for automatic DST handling.
+  - Added support for predefined timezones (TZ_Australia_Sydney, TZ_America_New_York, etc.) and simplified time synchronization using built-in ESP8266 timezone functions.
+  - Removed manual DST rule configuration requirements and enhanced timezone configuration with detailed POSIX TZ string documentation.
+  - Updated configTime() to use the modern TZ string parameter, added web-based timezone selection with dropdown menu, and expanded timezone options to 88 global entries.
+  - Added /timezone endpoint for dynamic timezone changes, enabled automatic NTP re-sync upon change, displayed the current timezone in NTP debug, set display schedule default to enabled, and fixed the PSTR() compilation error.
+
+v2.3 - 15th December 2025
+  - Added a visual light level indicator with gradient bar chart and dynamic emoji icons (sun/cloud/moon) that match LDR readings.
+  - Merged Status and Configuration sections into a unified card, converted controls (display, temperature unit) to buttons, and introduced the Display Brightness mode indicator.
+  - Reorganized layout with clear subsections for better readability and consistent styling across all controls.
+
+v2.2 - 15th December 2025
+  - Reorganized the web UI by moving the light level indicator next to the time, relocating the brightness readout to Configuration, and renaming it to Display Brightness.
+  - Introduced Orbitron digital styling with a large 48px glowing green time and 28px blue date to strengthen the hierarchy and readability.
+
+v2.1 - 15th December 2025
+  - Replaced the BMP280 with the BME280 for humidity support, added humidity and pressure displays, and fixed the sensor API output.
+  - Switched the BME280 I2C address to 0x76, fixed UTF-8 encoding on the webpage, removed unused SHT3X files, and improved the /api/status endpoint plus JavaScript rendering.
+
+v2.0 - 14th December 2025
+  - Rebuilt the web UI to use AJAX updates, eliminating flicker, and added `/api/time` plus `/api/status` JSON endpoints.
+  - Added manual brightness override with a slider and Auto/Manual toggle, implemented display scheduling with validation, and improved display initialization.
+  - Merged time and environment data into a single card and added on-demand status refresh logic when brightness changes.
+
+v1.1 - December 2025
+  - Initial GitHub repo migration to PlatformIO with WiFiManager integration, dedicated font/MAX7219 modules, and partially tested sensor code with working clock/date/time.
+
+v1.0 - October 2025
+  - Complete rewrite with WiFiManager setup, BMP/BME280 sensing, automatic NTP sync with DST, PIR-based motion control, and LDR-driven brightness.
+  - Delivered a structured codebase with strong error handling, debug output, and a web interface for configuration.
+
+======================== HARDWARE SETUP ========================
+
+ESP8266 (NodeMCU 1.0 or D1 Mini)
+
+MAX7219 LED Matrix (32x16 - 8 modules):
+  DIN  -> D8 (GPIO15)
+  CS   -> D7 (GPIO13)
+  CLK  -> D6 (GPIO12)
+  VCC  -> 5V
+  GND  -> GND
+  Note: Add 100-470µF capacitor between VCC and GND
+
+BMP/BME280 Temperature/Pressure/Humidity Sensor (I2C):
+  VCC  -> 3.3V
+  GND  -> GND
+  SDA  -> D2 (GPIO4)
+  SCL  -> D1 (GPIO5)
+  Note: Supports BMP280 (temperature/pressure) or BME280 (temperature/pressure/humidity)
+
+PIR Motion Sensor:
+  VCC  -> 5V
+  GND  -> GND
+  OUT  -> D3 (GPIO0)
+
+LDR (Light Sensor) Circuit:
+  3.3V -> 10kΩ resistor -> A0 -> LDR -> GND
+  Optional: 100nF capacitor across LDR
+
+==============================================================================================
+
+DETAILED CHANGELOG SUMMARY (Co-Pilot)
+- 2025-10-XX: Initial rewrite and features (see header above for full changelog).
+- 2025-12-13: Removed unused variable 'fwd' from font helper to fix compiler warnings.
+- 2025-12-13: Removed unused variable 'fht' from `charWidth()` to fix compiler warning.
+- 2025-12-13: Added concise changelog comments section at top of code.
+- 2025-12-14: Moved NUM_MAX, LINE_WIDTH, ROTATE, and pin definitions before max7219.h include.
+- 2025-12-14: Fixed NUM_MAX scope error in max7219.h by reordering includes/defines.
+- 2025-12-14: Removed full-page refresh, replaced with JavaScript AJAX updates to eliminate flickering.
+- 2025-12-14: Added /api/time endpoint for JSON time data (1-second refresh).
+- 2025-12-14: Added /api/status endpoint for JSON status data (brightness, motion, display state).
+- 2025-12-14: Added manual brightness override with Auto/Manual toggle in web interface.
+- 2025-12-14: Added brightness slider (1-15) for manual brightness control.
+- 2025-12-14: Status section now updates on-demand when brightness is changed.
+- 2025-12-14: Added HTTP 302 redirect after brightness mode toggle to refresh page.
+- 2025-12-14: Added display schedule configuration (start/end times, enable/disable flag).
+- 2025-12-14: Added isWithinScheduleWindow() function for schedule validation.
+- 2025-12-14: Updated handleBrightnessAndMotion() to respect display schedule times.
+- 2025-12-14: Added schedule notification in the web status section (shows when display is off due to schedule).
+- 2025-12-14: Enhanced /api/status endpoint with schedule_disabled, outside_schedule, schedule_start/end fields.
+- 2025-12-14: Added Display Schedule web form with enable/disable, start/end time inputs.
+- 2025-12-14: Added /schedule endpoint (POST) to handle display schedule configuration updates.
+- 2025-12-14: Merged Current Time and Environment sections on the web page into a single card.
+- 2025-12-15: Replaced Adafruit_BMP280 with Adafruit_BME280 library for humidity support.
+- 2025-12-15: Updated sensor object from bmp280 to bme280 with humidity reading capability.
+- 2025-12-15: Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules).
+- 2025-12-15: Updated testSensor() to read and validate humidity from BME280.
+- 2025-12-15: Updated updateSensorData() to read humidity and validate against the 0-100% range.
+- 2025-12-15: Changed LED matrix display from "T°C P[hPa]" to "T°C H[%]" format.
+- 2025-12-15: Replaced pressure with humidity in web interface sensor display.
+- 2025-12-15: Updated serial debug output to show humidity instead of pressure.
+- 2025-12-15: Added UTF-8 charset meta tag to the HTML head for proper character encoding.
+- 2025-12-15: Replaced degree symbol with HTML entity (&deg;) in all webpage outputs.
+- 2025-12-15: Enhanced /api/status endpoint with temperature, humidity, pressure, and sensor_available fields.
+- 2025-12-15: Updated updateStatus() JavaScript function to display sensor data from API.
+- 2025-12-15: Added sensor-data element to HTML for dynamic sensor reading updates.
+- 2025-12-15: Removed unused WEMOS_SHT3X.cpp and WEMOS_SHT3X.h files from project.
+- 2025-12-15: Reorganized web interface layout by moving Light Level from Status to Current Time & Environment.
+- 2025-12-15: Moved Current Brightness from Status to Configuration > Brightness Control.
+- 2025-12-15: Renamed Current Brightness to Display Brightness for improved clarity.
+- 2025-12-15: Added Google Fonts Orbitron font family for digital-style time/date display.
+- 2025-12-15: Enhanced time display with 48px font size, green color, and glowing text shadow effect.
+- 2025-12-15: Enhanced date display with 28px font size and blue color using Orbitron font.
+- 2025-12-15: Added CSS classes .digital-time and .digital-date for consistent digital clock styling.
+- 2025-12-15: Added visual light level bar chart with gradient fill (0-100% based on LDR reading).
+- 2025-12-15: Implemented dynamic emoji icons for light conditions (sun, cloud, moon).
+- 2025-12-15: Created CSS classes .light-container, .light-icon, .light-bar-bg, .light-bar-fill for light visualization.
+- 2025-12-15: Reversed light bar gradient from light-to-dark to match LDR behavior (low=bright, high=dark).
+- 2025-12-15: Updated icon logic so low LDR values show sun (bright), high values show moon (dark).
+- 2025-12-15: Modified JavaScript updateStatus() to dynamically update light bar width and icon.
+- 2025-12-15: Merged Status and Configuration sections into a single "Status & Configuration" card.
+- 2025-12-15: Added Status and Configuration subsection headers (h3) for clear organization.
+- 2025-12-15: Converted Display ON/OFF link to button format with "Turn ON"/"Turn OFF" labels.
+- 2025-12-15: Added Display Brightness mode (Manual/Automatic) indicator to Status.
+- 2025-12-15: Moved brightness mode toggle button from Configuration to Status.
+- 2025-12-15: Changed Brightness Control from h3 to h4 heading under Configuration.
+- 2025-12-15: Converted Temperature Unit control from link to button format.
+- 2025-12-15: Changed Temperature Unit from h3 to h4 heading under Configuration.
+- 2025-12-15: Updated temperature toggle button text to "Switch to Celsius"/"Switch to Fahrenheit".
+- 2025-12-15: Changed Display Schedule from h3 to h4 heading under Configuration.
+- 2025-12-15: Removed redundant brightness-mode span element from Configuration.
+- 2025-12-15: Updated JavaScript to use brightness-mode-status for Status updates.
+- 2025-12-15: Replaced obsolete simpleDSTadjust library with modern TZ.h timezone support.
+- 2025-12-15: Removed #include <simpleDSTadjust.h> and added #include <TZ.h> and <coredecls.h>.
+- 2025-12-15: Replaced manual TIMEZONE_OFFSET and DST rules with POSIX TZ strings.
+- 2025-12-15: Implemented predefined timezone macros (TZ_Australia_Sydney, TZ_America_New_York, etc.).
+- 2025-12-15: Added comprehensive POSIX TZ string format documentation in timezone configuration.
+- 2025-12-15: Removed struct dstRule and simpleDSTadjust object declarations from globals.
+- 2025-12-15: Updated syncNTP() to use configTime(MY_TZ, NTP_SERVERS) instead of manual offset calculation.
+- 2025-12-15: Simplified updateTime() to use time(nullptr) and localtime() directly.
+- 2025-12-15: Removed dstAdjusted.time() call and replaced with standard time functions.
+- 2025-12-15: Added support for additional timezones (Europe, Asia) with predefined TZ constants.
+- 2025-12-15: Documented custom TZ string format for non-standard timezone requirements.
+- 2025-12-15: Added currentTimezone global variable to track selected timezone index.
+- 2025-12-15: Created TimezoneOption struct to store timezone name and TZ string pairs.
+- 2025-12-15: Implemented timezones[] array with 20 predefined timezone options.
+- 2025-12-15: Added numTimezones constant for array size calculation.
+- 2025-12-15: Updated syncNTP() to use timezones[currentTimezone].tzString for configTime().
+- 2025-12-15: Enhanced NTP sync debug output to display selected timezone name.
+- 2025-12-15: Added Timezone configuration section to the web UI.
+- 2025-12-15: Implemented timezone dropdown select menu with all available options.
+- 2025-12-15: Created /timezone POST endpoint to handle timezone changes.
+- 2025-12-15: Added automatic NTP re-sync when timezone is changed via the web UI.
+- 2025-12-15: Implemented timezone validation (0 to numTimezones-1) in endpoint handler.
+- 2025-12-15: Expanded timezone coverage from 20 to 88 global timezones.
+- 2025-12-15: Added Australia/Pacific region coverage (10 zones).
+- 2025-12-15: Added North America coverage (15 zones).
+- 2025-12-15: Added South America coverage (8 zones).
+- 2025-12-15: Expanded Europe coverage (20 zones).
+- 2025-12-15: Added East Asia coverage (10 zones).
+- 2025-12-15: Added South/Central Asia coverage (8 zones).
+- 2025-12-15: Added Middle East coverage (7 zones).
+- 2025-12-15: Added Africa coverage (10 zones).
+- 2025-12-15: Fixed PSTR() compilation error by using POSIX TZ string literals instead of TZ_* macros.
+- 2025-12-15: Changed displayScheduleEnabled default from false to true.
+- 2025-12-15: Updated timezone array to use PROGMEM for flash storage to save RAM.
+- 2025-12-15: Reworked light level UI so the bar width shrinks as readings increase and reversed the gradient to run dark-to-bright.
+- 2025-12-15: Locked moon/sun icons to left/right of the light bar and removed the raw LDR value label.
+- 2025-12-15: Increased .digital-time font size from 48px to 72px for improved readability.
+- 2025-12-15: Switched temperature unit label rendering to use the real ° symbol instead of &deg; placeholders.
+- 2025-12-15: Added temp_unit_short to /api/status so the sensor readout can append °C/°F dynamically.
+*/
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <WiFiManager.h>
 #include <ESP8266WebServer.h>
 #include <time.h>
-#include <simpleDSTadjust.h>
+#include <TZ.h>
+#include <coredecls.h>
 #include <Wire.h>
 #include <Adafruit_BME280.h>
 
@@ -211,26 +227,40 @@
 #define NTP_SERVERS "pool.ntp.org", "time.nist.gov", "time.google.com"
 
 // Timezone Configuration - Select your region below
+// Uses POSIX TZ strings for automatic DST handling
+// Format: STD offset DST [offset],start[/time],end[/time]
+//   STD = Standard timezone abbreviation
+//   offset = Hours offset from UTC (negative for west of Greenwich)
+//   DST = Daylight saving timezone abbreviation  
+//   start/end = When DST starts/ends (Mmonth.week.day/hour format)
+
 // Australia Eastern Time (Sydney, Melbourne)
-#define TIMEZONE_OFFSET 10        // UTC offset in hours
-#define DST_START_RULE {"AEDT", First, Sun, Oct, 2, 3600}  // UTC+11
-#define DST_END_RULE {"AEST", First, Sun, Apr, 2, 0}       // UTC+10
+// AEST (UTC+10) / AEDT (UTC+11) - DST first Sunday in October to first Sunday in April
+#define MY_TZ TZ_Australia_Sydney
 
 // Alternate timezones (comment out above and uncomment one below if needed):
 // US Eastern Time (New York)
-// #define TIMEZONE_OFFSET -5
-// #define DST_START_RULE {"EDT", Second, Sun, Mar, 2, 3600}  // UTC-4
-// #define DST_END_RULE {"EST", First, Sun, Nov, 2, 0}        // UTC-5
+// #define MY_TZ TZ_America_New_York
 
 // US Pacific Time (Los Angeles)
-// #define TIMEZONE_OFFSET -8
-// #define DST_START_RULE {"PDT", Second, Sun, Mar, 2, 3600}  // UTC-7
-// #define DST_END_RULE {"PST", First, Sun, Nov, 2, 0}        // UTC-8
+// #define MY_TZ TZ_America_Los_Angeles
 
 // UK (London)
-// #define TIMEZONE_OFFSET 0
-// #define DST_START_RULE {"BST", Last, Sun, Mar, 1, 3600}    // UTC+1
-// #define DST_END_RULE {"GMT", Last, Sun, Oct, 1, 0}         // UTC+0
+// #define MY_TZ TZ_Europe_London
+
+// Central European Time (Paris, Berlin, Rome)
+// #define MY_TZ TZ_Europe_Paris
+
+// Japan (Tokyo) - No DST
+// #define MY_TZ TZ_Asia_Tokyo
+
+// Custom TZ string example if your timezone isn't predefined:
+// #define MY_TZ "AEST-10AEDT,M10.1.0,M4.1.0/3"
+// Format breakdown for Sydney:
+//   AEST-10 = Australian Eastern Standard Time, UTC+10 (negative means east)
+//   AEDT = Australian Eastern Daylight Time
+//   M10.1.0 = Month 10 (October), 1st occurrence, Sunday (0), at 2am (default)
+//   M4.1.0/3 = Month 4 (April), 1st occurrence, Sunday (0), at 3am
 
 // Debug Output
 #define DEBUG_ENABLED true        // Set to false to disable serial output
@@ -241,11 +271,6 @@
 #endif
 
 // ======================== OBJECTS & GLOBALS ========================
-
-// DST Rules
-struct dstRule startRule = DST_START_RULE;
-struct dstRule endRule = DST_END_RULE;
-simpleDSTadjust dstAdjusted(startRule, endRule);
 
 // Sensors
 Adafruit_BME280 bme280;
@@ -280,14 +305,14 @@ bool lightLevelChanged = false;  // Flag to trigger webpage refresh on significa
 int displayTimer = DISPLAY_TIMEOUT;
 bool displayOn = true;
 bool motionDetected = false;
-bool brightnessManualOverride = true;  // Manual brightness mode flag
+bool brightnessManualOverride = false;  // Manual brightness mode flag
 int manualBrightness = 4;               // Manual brightness value (1-15)
 bool displayManualOverride = false;     // Manual display on/off override flag
 unsigned long displayManualOverrideTimeout = 0;  // Timeout for manual override (in milliseconds)
 #define DISPLAY_MANUAL_OVERRIDE_DURATION 300000  // 5 minutes
 
 // Display Schedule Configuration
-bool displayScheduleEnabled = false;    // Enable/disable scheduled on/off times (default: disabled)
+bool displayScheduleEnabled = true;     // Enable/disable scheduled on/off times (default: enabled)
 int scheduleStartHour = 6;              // Turn on at 6:00 AM
 int scheduleStartMinute = 0;
 int scheduleEndHour = 22;               // Turn off at 10:00 PM
@@ -295,6 +320,123 @@ int scheduleEndMinute = 0;
 
 // Temperature Unit Configuration
 bool useFahrenheit = false;             // false = Celsius (default), true = Fahrenheit
+
+// Timezone Configuration
+int currentTimezone = 0;                // Index into timezone array (0 = Australia/Sydney by default)
+
+// Predefined timezone options (name and TZ string pairs)
+// Note: TZ strings are stored in flash memory to save RAM
+struct TimezoneOption {
+  const char* name;
+  const char* tzString;
+};
+
+const TimezoneOption timezones[] PROGMEM = {
+  // Australia & Pacific (10 zones)
+  {"Australia/Sydney", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+  {"Australia/Melbourne", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+  {"Australia/Brisbane", "AEST-10"},
+  {"Australia/Perth", "AWST-8"},
+  {"Australia/Adelaide", "ACST-9:30ACDT,M10.1.0,M4.1.0/3"},
+  {"Australia/Darwin", "ACST-9:30"},
+  {"Australia/Hobart", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+  {"New Zealand/Auckland", "NZST-12NZDT,M9.5.0,M4.1.0/3"},
+  {"Pacific/Fiji", "<+12>-12<+13>,M11.2.0,M1.3.0/3"},
+  {"Pacific/Honolulu", "HST10"},
+  
+  // Americas - North America (15 zones)
+  {"America/New_York", "EST5EDT,M3.2.0,M11.1.0"},
+  {"America/Chicago", "CST6CDT,M3.2.0,M11.1.0"},
+  {"America/Denver", "MST7MDT,M3.2.0,M11.1.0"},
+  {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"},
+  {"America/Anchorage", "AKST9AKDT,M3.2.0,M11.1.0"},
+  {"America/Phoenix", "MST7"},
+  {"America/Toronto", "EST5EDT,M3.2.0,M11.1.0"},
+  {"America/Vancouver", "PST8PDT,M3.2.0,M11.1.0"},
+  {"America/Halifax", "AST4ADT,M3.2.0,M11.1.0"},
+  {"America/Mexico_City", "CST6CDT,M4.1.0,M10.5.0"},
+  {"America/Cancun", "EST5"},
+  {"America/Havana", "CST5CDT,M3.2.0/0,M11.1.0/1"},
+  {"America/Jamaica", "EST5"},
+  {"America/Puerto_Rico", "AST4"},
+  {"America/Barbados", "AST4"},
+  
+  // Americas - South America (8 zones)
+  {"America/Sao_Paulo", "<-03>3<-02>,M11.1.0/0,M2.3.0/0"},
+  {"America/Buenos_Aires", "<-03>3"},
+  {"America/Santiago", "<-04>4<-03>,M9.1.6/24,M4.1.6/24"},
+  {"America/Lima", "<-05>5"},
+  {"America/Bogota", "<-05>5"},
+  {"America/Caracas", "<-04>4"},
+  {"America/Guyana", "<-04>4"},
+  {"America/Montevideo", "<-03>3"},
+  
+  // Europe (20 zones)
+  {"Europe/London", "GMT0BST,M3.5.0/1,M10.5.0"},
+  {"Europe/Dublin", "IST-1GMT0,M10.5.0,M3.5.0/1"},
+  {"Europe/Paris", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Berlin", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Rome", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Madrid", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Amsterdam", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Brussels", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Zurich", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Vienna", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Athens", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+  {"Europe/Helsinki", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+  {"Europe/Istanbul", "<+03>-3"},
+  {"Europe/Moscow", "MSK-3"},
+  {"Europe/Warsaw", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Prague", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Stockholm", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Oslo", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Copenhagen", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Europe/Lisbon", "WET0WEST,M3.5.0/1,M10.5.0"},
+  
+  // Asia - East Asia (10 zones)
+  {"Asia/Tokyo", "JST-9"},
+  {"Asia/Seoul", "KST-9"},
+  {"Asia/Shanghai", "CST-8"},
+  {"Asia/Hong_Kong", "HKT-8"},
+  {"Asia/Taipei", "CST-8"},
+  {"Asia/Singapore", "SGT-8"},
+  {"Asia/Bangkok", "<+07>-7"},
+  {"Asia/Jakarta", "WIB-7"},
+  {"Asia/Manila", "PST-8"},
+  {"Asia/Kuala_Lumpur", "<+08>-8"},
+  
+  // Asia - South & Central Asia (8 zones)
+  {"Asia/Kolkata", "IST-5:30"},
+  {"Asia/Mumbai", "IST-5:30"},
+  {"Asia/Delhi", "IST-5:30"},
+  {"Asia/Dhaka", "<+06>-6"},
+  {"Asia/Karachi", "PKT-5"},
+  {"Asia/Kathmandu", "<+0545>-5:45"},
+  {"Asia/Colombo", "<+0530>-5:30"},
+  {"Asia/Almaty", "<+06>-6"},
+  
+  // Middle East (7 zones)
+  {"Asia/Dubai", "<+04>-4"},
+  {"Asia/Riyadh", "<+03>-3"},
+  {"Asia/Qatar", "<+03>-3"},
+  {"Asia/Kuwait", "<+03>-3"},
+  {"Asia/Bahrain", "<+03>-3"},
+  {"Asia/Jerusalem", "IST-2IDT,M3.4.4/26,M10.5.0"},
+  {"Asia/Tehran", "<+0330>-3:30<+0430>,J79/24,J263/24"},
+  
+  // Africa (10 zones)
+  {"Africa/Cairo", "EET-2"},
+  {"Africa/Johannesburg", "SAST-2"},
+  {"Africa/Lagos", "WAT-1"},
+  {"Africa/Nairobi", "EAT-3"},
+  {"Africa/Algiers", "CET-1"},
+  {"Africa/Casablanca", "<+01>-1"},
+  {"Africa/Tunis", "CET-1"},
+  {"Africa/Accra", "GMT0"},
+  {"Africa/Addis_Ababa", "EAT-3"},
+  {"Africa/Dar_es_Salaam", "EAT-3"}
+};
+const int numTimezones = sizeof(timezones) / sizeof(timezones[0]);
 
 // Timing
 unsigned long lastNTPUpdate = 0;
@@ -585,7 +727,11 @@ void showMessage(const char* message) {
 bool syncNTP() {
   DEBUG(Serial.println("Syncing with NTP servers..."));
   
-  configTime(TIMEZONE_OFFSET * 3600, 0, NTP_SERVERS);
+  // Read timezone string from PROGMEM
+  const char* tzString = timezones[currentTimezone].tzString;
+  
+  // Set timezone using modern TZ.h method with selected timezone
+  configTime(tzString, NTP_SERVERS);
   
   // Wait for time sync (max 10 seconds)
   int attempts = 0;
@@ -602,15 +748,15 @@ bool syncNTP() {
   }
   
   updateTime();
-  DEBUG(Serial.printf("Time synced: %02d:%02d:%02d %02d/%02d/%d\n",
-                      hours, minutes, seconds, day, month, year));
+  DEBUG(Serial.printf("Time synced: %02d:%02d:%02d %02d/%02d/%d (TZ: %s)\n",
+                      hours, minutes, seconds, day, month, year,
+                      timezones[currentTimezone].name));
   return true;
 }
 
 void updateTime() {
-  char* dstAbbrev;
-  time_t t = dstAdjusted.time(&dstAbbrev);
-  struct tm* timeinfo = localtime(&t);
+  time_t now = time(nullptr);
+  struct tm* timeinfo = localtime(&now);
   
   // Convert to 12-hour format
   int h24 = timeinfo->tm_hour;
@@ -793,13 +939,12 @@ void setupWebServer() {
     html += "<style>body{font-family:Arial;margin:20px;background:#f0f0f0;}";
     html += ".card{background:white;padding:20px;margin:10px;border-radius:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}";
     html += "h1{color:#333;}";
-    html += ".digital-time{font-family:'Orbitron',monospace;font-size:48px;font-weight:900;color:#00ff00;text-shadow:0 0 10px #00ff00;letter-spacing:0.1em;margin:10px 0;}";
+    html += ".digital-time{font-family:'Orbitron',monospace;font-size:72px;font-weight:900;color:#00ff00;text-shadow:0 0 10px #00ff00;letter-spacing:0.1em;margin:10px 0;}";
     html += ".digital-date{font-family:'Orbitron',monospace;font-size:28px;font-weight:700;color:#0080ff;letter-spacing:0.05em;margin:10px 0;}";
     html += ".light-container{display:flex;align-items:center;gap:10px;margin:10px 0;}";
     html += ".light-icon{font-size:24px;min-width:30px;text-align:center;}";
     html += ".light-bar-bg{flex-grow:1;height:30px;background:#e0e0e0;border-radius:15px;overflow:hidden;position:relative;}";
-    html += ".light-bar-fill{height:100%;background:linear-gradient(90deg,#fff9c4 0%,#ffeb3b 50%,#1a1a1a 100%);transition:width 0.3s ease;border-radius:15px;}";
-    html += ".light-value{min-width:60px;font-weight:bold;text-align:right;}</style>";
+    html += ".light-bar-fill{height:100%;background:linear-gradient(90deg,#1a1a1a 0%,#ffeb3b 50%,#fff9c4 100%);transition:width 0.3s ease;border-radius:15px;}</style>";
     html += "<script>";
     html += "function updateTime() {";
     html += "  fetch('/api/time').then(r => r.json()).then(d => {";
@@ -812,15 +957,12 @@ void setupWebServer() {
     html += "    document.getElementById('display-status').innerText = d.display;";
     html += "    document.getElementById('motion-status').innerText = d.motion;";
     html += "    document.getElementById('brightness-status').innerText = d.brightness + '/15';";
-    html += "    document.getElementById('light-status').innerText = d.light;";
-    html += "    let lightPercent = Math.round((d.light / 1023) * 100);";
+    html += "    let lightPercent = 100 - Math.round((d.light / 1023) * 100);";
     html += "    document.getElementById('light-bar').style.width = lightPercent + '%';";
-    html += "    let icon = d.light > 680 ? '🌙' : (d.light > 340 ? '☁️' : '☀️');";
-    html += "    document.getElementById('light-icon').innerText = icon;";
     html += "    document.getElementById('brightness-mode-status').innerText = d.mode === 'Manual' ? 'Manual' : 'Automatic';";
-    html += "    document.getElementById('temp-unit-display').innerText = d.temp_unit;";
+    html += "    document.getElementById('temp-unit-display').innerHTML = d.temp_unit;";
     html += "    if (d.sensor_available) {";
-    html += "      document.getElementById('sensor-data').innerHTML = 'Temperature: ' + d.temperature + '&deg; | Humidity: ' + d.humidity + '% | Pressure: ' + d.pressure + ' hPa';";
+    html += "      document.getElementById('sensor-data').innerHTML = 'Temperature: ' + d.temperature + '&deg;' + d.temp_unit_short + ' | Humidity: ' + d.humidity + '% | Pressure: ' + d.pressure + ' hPa';";
     html += "    }";
     html += "    let scheduleNotice = document.getElementById('schedule-notice');";
     html += "    if (d.schedule_disabled || d.outside_schedule) {";
@@ -858,13 +1000,13 @@ void setupWebServer() {
     }
     
     // Light level bar chart with icons (reversed: low=bright, high=dark)
-    int lightPercent = map(lightLevel, 0, 1023, 0, 100);
+    int lightPercent = 100 - map(lightLevel, 0, 1023, 0, 100);
     html += "<div class='light-container'>";
-    html += "<span class='light-icon' id='light-icon'>" + String(lightLevel > 680 ? "🌙" : (lightLevel > 340 ? "☁️" : "☀️")) + "</span>";
+    html += "<span class='light-icon'>🌙</span>";
     html += "<div class='light-bar-bg'>";
     html += "<div class='light-bar-fill' id='light-bar' style='width:" + String(lightPercent) + "%'></div>";
     html += "</div>";
-    html += "<span class='light-value' id='light-status'>" + String(lightLevel) + "</span>";
+    html += "<span class='light-icon'>☀️</span>";
     html += "</div>";
     html += "</div>";
     
@@ -900,6 +1042,19 @@ void setupWebServer() {
     html += "<button onclick=\"fetch('/temperature?mode=toggle').then(() => location.reload())\" style='padding:5px 10px;cursor:pointer;'>";
     html += String(useFahrenheit ? "Switch to Celsius" : "Switch to Fahrenheit");
     html += "</button></p>";
+    
+    // Timezone Selection Section
+    html += "<h4 style='margin-top:15px;margin-bottom:5px;'>Timezone</h4>";
+    html += "<form method='POST' action='/timezone'>";
+    html += "<p><label>Select Timezone: <select name='tz' style='padding:5px;'>";
+    for (int i = 0; i < numTimezones; i++) {
+      html += "<option value='" + String(i) + "'" + String(i == currentTimezone ? " selected" : "") + ">";
+      html += String(timezones[i].name);
+      html += "</option>";
+    }
+    html += "</select></label> ";
+    html += "<button type='submit' style='padding:5px 10px;cursor:pointer;'>Update Timezone</button></p>";
+    html += "</form>";
     
     // Display Schedule Section
     html += "<h4 style='margin-top:15px;margin-bottom:5px;'>Display Schedule</h4>";
@@ -954,6 +1109,8 @@ void setupWebServer() {
     json += String(brightnessManualOverride ? "Manual" : "Auto");
     json += "\",\"temp_unit\":\"";
     json += String(useFahrenheit ? "Fahrenheit (&deg;F)" : "Celsius (&deg;C)");
+    json += "\",\"temp_unit_short\":\"";
+    json += String(useFahrenheit ? "F" : "C");
     json += "\",\"temperature\":";
     json += String(displayTemp);
     json += ",\"humidity\":";
@@ -1010,6 +1167,23 @@ void setupWebServer() {
       return;
     }
     server.send(200, "text/plain", "OK");
+  });
+  
+  // Timezone configuration endpoint
+  server.on("/timezone", HTTP_POST, []() {
+    if (server.hasArg("tz")) {
+      int newTimezone = server.arg("tz").toInt();
+      if (newTimezone >= 0 && newTimezone < numTimezones) {
+        currentTimezone = newTimezone;
+        DEBUG(Serial.printf("Timezone changed to: %s\n", timezones[currentTimezone].name));
+        
+        // Re-sync time with new timezone
+        syncNTP();
+      }
+    }
+    // Redirect to home page
+    server.sendHeader("Location", "/");
+    server.send(302, "text/plain", "");
   });
   
   // Display on/off toggle endpoint
