@@ -16,6 +16,22 @@ Libraries:
 
 =========================== CHANGELOG ==========================
 
+ v2.7 - 19th December 2025
+    - Added LED Display Mirror to Webserver
+    - Refactored project structure: moved fonts.h, max7219.h to include/ directory and created new timezones.h header.
+    - Timezone dropdown now auto-updates on selection change without requiring a button press.
+    - Added current timezone name to "Current Time & Environment" heading with dynamic AJAX updates.
+    - Enhanced /api/all endpoint with timezone_name field for better web interface integration.
+    - Removed "Update Timezone" button for cleaner, more intuitive UX.
+    - Improved code organization by consolidating 88 timezone definitions into dedicated timezones.h file.
+    - Code refactoring and formatting improvements for better maintainability.
+
+ v2.6 - 17th December 2025
+    - Added LDR raw reading display to Brightness Control section in web interface.
+    - Reordered brightness display to show "LDR Raw Reading: xxxx, calculating Display Brightness to: xx/15".
+    - Added real-time JavaScript update for LDR reading value via AJAX.
+    - Improved user visibility into automatic brightness calculation from ambient light sensor.
+
  v2.5 - 16th December 2025
     - Light indicator behavior now matches the LDR (dark -> short bar, reversed gradient, static 🌙/☀️ icons) and the raw reading was removed.
     - Digital time display enlarged to 72px for better readability on any screen.

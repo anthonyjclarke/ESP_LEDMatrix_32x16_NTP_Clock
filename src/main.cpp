@@ -6,16 +6,27 @@
  * Acknowledgements: Original by @cbm80amiga here - https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
  * 
  * =========================== TODO ==========================
- * - Enable switching between 12/24 hour formats
- * - Switch between different timezones via web interface
  * - Switch LDR sensitivity via web interface and On/Off
  * - get weather from online API and display on matrix and webpage using https://openweathermap.org/
  * - Implement web interface for full configuration
  * - Add OTA firmware update capability
  * - tidy up web interface and combine all configuration into single page
- * - Fix Readme formatting
  * 
  * ======================== CHANGELOG ========================
+ * 
+ * v2.7 - 19th December 2025
+ *   - Added LED Display Mirror to Webserver (Bit of Fun!)
+ *   - Timezone dropdown now auto-updates on selection change (no button needed)
+ *   - Added current timezone name to "Current Time & Environment" heading
+ *   - Timezone name dynamically updates via AJAX when changed
+ *   - Removed "Update Timezone" button for cleaner UX
+ *   - Enhanced /api/all endpoint with timezone_name field
+ * 
+ * v2.6 - 17th December 2025
+ *   - Added LDR raw reading display to Brightness Control section in web interface
+ *   - Reordered brightness display to show "LDR Raw Reading: xxxx, calculating Display Brightness to: xx/15"
+ *   - Added real-time JavaScript update for LDR reading value via AJAX
+ *   - Improved user visibility into automatic brightness calculation from ambient light sensor
  * 
  * v2.5 - 16th December 2025
  *   - Refined light level UI so the bar shrinks as ambient light readings rise
@@ -114,6 +125,11 @@
 
 
  * DETAILED CHANGELOG SUMMARY (Co-Pilot)
+ * - 2025-12-19: Added auto-update to timezone dropdown selection (onChange event handler).
+ * - 2025-12-19: Removed "Update Timezone" button for cleaner UX and instant timezone changes.
+ * - 2025-12-19: Added timezone_name field to /api/all JSON endpoint.
+ * - 2025-12-19: Updated "Current Time & Environment" heading to include timezone name dynamically.
+ * - 2025-12-19: Added JavaScript to update timezone name in heading via updateAll() function.
  * - 2025-10-XX: Initial rewrite and features (see header above for full changelog).
  * - 2025-12-13: Removed unused variable 'fwd' from font helper to fix compiler warnings.
  * - 2025-12-13: Removed unused variable 'fht' from `charWidth()` to fix compiler warning.
@@ -198,7 +214,7 @@
  * - 2025-12-15: Implemented timezone validation (0 to numTimezones-1) in endpoint handler.
  * - 2025-12-15: Expanded timezone coverage from 20 to 88 global timezones.
  * - 2025-12-15: Fixed PSTR() compilation error by using POSIX TZ string literals instead of TZ_* macros.
- * - 2025-12-15: Changed displayScheduleEnabled default from false to true (schedule now enabled by default).
+ * - 2025-12-15: Changed schedule default to enabled (scheduleOffEnabled=true).
  * - 2025-12-15: Updated timezone array to use PROGMEM for flash storage to save RAM.
  * - 2025-12-15: Reworked light level UI so the bar width shrinks as readings increase and
  *               swapped the gradient direction to run dark-to-bright.
@@ -206,6 +222,10 @@
  * - 2025-12-16: Increased .digital-time font size from 48px to 72px for improved readability.
  * - 2025-12-16: Switched temperature unit label rendering to use the real ° symbol instead of &deg; placeholders.
  * - 2025-12-16: Added temp_unit_short to /api/status so the sensor readout can append °C/°F dynamically.
+ * - 2025-12-17: Added LDR raw reading display to Brightness Control section in web interface.
+ * - 2025-12-17: Reordered brightness display to show "LDR Raw Reading: xxxx, calculating Display Brightness to: xx/15".
+ * - 2025-12-17: Added ldr-status span element for dynamic LDR value updates via JavaScript.
+ * - 2025-12-17: Updated updateAll() JavaScript function to refresh LDR reading from API response.
  */
 
 #include <Arduino.h>
@@ -236,6 +256,7 @@
 
 #include "max7219.h"
 #include "fonts.h"
+#include "timezones.h"
 
 // Timing Configuration
 #define DISPLAY_TIMEOUT 60        // Seconds before display turns off (no motion)
@@ -246,7 +267,7 @@
 // NTP Server Configuration
 #define NTP_SERVERS "pool.ntp.org", "time.nist.gov", "time.google.com"
 
-// Timezone Configuration - Select your region below
+// Timezone Configuration - Defaults to Sydney, Australia - can be changed on web interface
 // Uses POSIX TZ strings for automatic DST handling
 // Format: STD offset DST [offset],start[/time],end[/time]
 //   STD = Standard timezone abbreviation
@@ -256,6 +277,7 @@
 
 // Australia Eastern Time (Sydney, Melbourne)
 // AEST (UTC+10) / AEDT (UTC+11) - DST first Sunday in October to first Sunday in April
+
 #define MY_TZ TZ_Australia_Sydney
 
 // Alternate timezones (comment out above and uncomment one below if needed):
@@ -303,8 +325,14 @@ WiFiManager wifiManager;
 
 // Time Variables
 int hours, minutes, seconds;
+int hours24;                       // 24-hour clock for schedule logic
 int day, month, year, dayOfWeek;
 bool showDots = true;
+
+// Time format
+// NOTE: In 24-hour mode we intentionally do NOT render seconds on the 32x16 LED matrix.
+// With this project’s current fonts/layout, "HH:MM:SS" cannot reliably fit in 32px width.
+bool use24HourFormat = false;      // false = 12-hour (default), true = 24-hour
 
 // Display Variables
 int xPos = 0, yPos = 0;
@@ -331,12 +359,13 @@ bool displayManualOverride = false;     // Manual display on/off override flag
 unsigned long displayManualOverrideTimeout = 0;  // Timeout for manual override (in milliseconds)
 #define DISPLAY_MANUAL_OVERRIDE_DURATION 300000  // 5 minutes
 
-// Display Schedule Configuration
-bool displayScheduleEnabled = true;     // Enable/disable scheduled on/off times (default: enabled)
-int scheduleStartHour = 6;              // Turn on at 6:00 AM
-int scheduleStartMinute = 0;
-int scheduleEndHour = 22;               // Turn off at 10:00 PM
-int scheduleEndMinute = 0;
+// Display OFF Schedule (OFF window)
+// When enabled, the display is forced OFF between the OFF start and OFF end times.
+bool scheduleOffEnabled = true;
+int scheduleOffStartHour = 22;          // OFF from 22:00
+int scheduleOffStartMinute = 0;
+int scheduleOffEndHour = 6;             // ...until 06:00
+int scheduleOffEndMinute = 0;
 
 // Temperature Unit Configuration
 bool useFahrenheit = false;             // false = Celsius (default), true = Fahrenheit
@@ -350,113 +379,6 @@ struct TimezoneOption {
   const char* name;
   const char* tzString;
 };
-
-const TimezoneOption timezones[] PROGMEM = {
-  // Australia & Pacific (10 zones)
-  {"Australia/Sydney", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-  {"Australia/Melbourne", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-  {"Australia/Brisbane", "AEST-10"},
-  {"Australia/Perth", "AWST-8"},
-  {"Australia/Adelaide", "ACST-9:30ACDT,M10.1.0,M4.1.0/3"},
-  {"Australia/Darwin", "ACST-9:30"},
-  {"Australia/Hobart", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-  {"New Zealand/Auckland", "NZST-12NZDT,M9.5.0,M4.1.0/3"},
-  {"Pacific/Fiji", "<+12>-12<+13>,M11.2.0,M1.3.0/3"},
-  {"Pacific/Honolulu", "HST10"},
-  
-  // Americas - North America (15 zones)
-  {"America/New_York", "EST5EDT,M3.2.0,M11.1.0"},
-  {"America/Chicago", "CST6CDT,M3.2.0,M11.1.0"},
-  {"America/Denver", "MST7MDT,M3.2.0,M11.1.0"},
-  {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"},
-  {"America/Anchorage", "AKST9AKDT,M3.2.0,M11.1.0"},
-  {"America/Phoenix", "MST7"},
-  {"America/Toronto", "EST5EDT,M3.2.0,M11.1.0"},
-  {"America/Vancouver", "PST8PDT,M3.2.0,M11.1.0"},
-  {"America/Halifax", "AST4ADT,M3.2.0,M11.1.0"},
-  {"America/Mexico_City", "CST6CDT,M4.1.0,M10.5.0"},
-  {"America/Cancun", "EST5"},
-  {"America/Havana", "CST5CDT,M3.2.0/0,M11.1.0/1"},
-  {"America/Jamaica", "EST5"},
-  {"America/Puerto_Rico", "AST4"},
-  {"America/Barbados", "AST4"},
-  
-  // Americas - South America (8 zones)
-  {"America/Sao_Paulo", "<-03>3<-02>,M11.1.0/0,M2.3.0/0"},
-  {"America/Buenos_Aires", "<-03>3"},
-  {"America/Santiago", "<-04>4<-03>,M9.1.6/24,M4.1.6/24"},
-  {"America/Lima", "<-05>5"},
-  {"America/Bogota", "<-05>5"},
-  {"America/Caracas", "<-04>4"},
-  {"America/Guyana", "<-04>4"},
-  {"America/Montevideo", "<-03>3"},
-  
-  // Europe (20 zones)
-  {"Europe/London", "GMT0BST,M3.5.0/1,M10.5.0"},
-  {"Europe/Dublin", "IST-1GMT0,M10.5.0,M3.5.0/1"},
-  {"Europe/Paris", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Berlin", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Rome", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Madrid", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Amsterdam", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Brussels", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Zurich", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Vienna", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Athens", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-  {"Europe/Helsinki", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-  {"Europe/Istanbul", "<+03>-3"},
-  {"Europe/Moscow", "MSK-3"},
-  {"Europe/Warsaw", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Prague", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Stockholm", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Oslo", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Copenhagen", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Europe/Lisbon", "WET0WEST,M3.5.0/1,M10.5.0"},
-  
-  // Asia - East Asia (10 zones)
-  {"Asia/Tokyo", "JST-9"},
-  {"Asia/Seoul", "KST-9"},
-  {"Asia/Shanghai", "CST-8"},
-  {"Asia/Hong_Kong", "HKT-8"},
-  {"Asia/Taipei", "CST-8"},
-  {"Asia/Singapore", "SGT-8"},
-  {"Asia/Bangkok", "<+07>-7"},
-  {"Asia/Jakarta", "WIB-7"},
-  {"Asia/Manila", "PST-8"},
-  {"Asia/Kuala_Lumpur", "<+08>-8"},
-  
-  // Asia - South & Central Asia (8 zones)
-  {"Asia/Kolkata", "IST-5:30"},
-  {"Asia/Mumbai", "IST-5:30"},
-  {"Asia/Delhi", "IST-5:30"},
-  {"Asia/Dhaka", "<+06>-6"},
-  {"Asia/Karachi", "PKT-5"},
-  {"Asia/Kathmandu", "<+0545>-5:45"},
-  {"Asia/Colombo", "<+0530>-5:30"},
-  {"Asia/Almaty", "<+06>-6"},
-  
-  // Middle East (7 zones)
-  {"Asia/Dubai", "<+04>-4"},
-  {"Asia/Riyadh", "<+03>-3"},
-  {"Asia/Qatar", "<+03>-3"},
-  {"Asia/Kuwait", "<+03>-3"},
-  {"Asia/Bahrain", "<+03>-3"},
-  {"Asia/Jerusalem", "IST-2IDT,M3.4.4/26,M10.5.0"},
-  {"Asia/Tehran", "<+0330>-3:30<+0430>,J79/24,J263/24"},
-  
-  // Africa (10 zones)
-  {"Africa/Cairo", "EET-2"},
-  {"Africa/Johannesburg", "SAST-2"},
-  {"Africa/Lagos", "WAT-1"},
-  {"Africa/Nairobi", "EAT-3"},
-  {"Africa/Algiers", "CET-1"},
-  {"Africa/Casablanca", "<+01>-1"},
-  {"Africa/Tunis", "CET-1"},
-  {"Africa/Accra", "GMT0"},
-  {"Africa/Addis_Ababa", "EAT-3"},
-  {"Africa/Dar_es_Salaam", "EAT-3"}
-};
-const int numTimezones = sizeof(timezones) / sizeof(timezones[0]);
 
 // Timing
 unsigned long lastNTPUpdate = 0;
@@ -532,6 +454,10 @@ void printStatus();
 void displayTimeAndTemp();
 void displayTimeLarge();
 void displayTimeAndDate();
+
+// Centralized display power/intensity application
+int computeAmbientBrightnessFromLdr(int ldrValue);
+void applyDisplayHardwareState(bool on, int intensity);
 
 // ======================== SETUP ========================
 
@@ -638,17 +564,20 @@ void loop()
     currentMode = newMode;
     DEBUG(Serial.print("Display mode: "); Serial.println(currentMode));
   }
-  
-  // Update display based on current mode
-  switch (currentMode) {
-    case 0: displayTimeAndTemp(); break;
-    case 1: displayTimeLarge(); break;
-    case 2: displayTimeAndDate(); break;
-  }
-  refreshAll();
-  
-  // Handle brightness and motion detection
+
+  // Handle brightness and motion detection (may change displayOn)
   handleBrightnessAndMotion();
+
+  // Only render/refresh when display is actually ON.
+  // This prevents needless SPI updates and avoids any weird state thrashing.
+  if (displayOn) {
+    switch (currentMode) {
+      case 0: displayTimeAndTemp(); break;
+      case 1: displayTimeLarge(); break;
+      case 2: displayTimeAndDate(); break;
+    }
+    refreshAll();
+  }
   
   // Debug output (throttled)
   static unsigned long lastDebug = 0;
@@ -664,18 +593,30 @@ void loop()
 
 void displayTimeAndTemp() {
   clr();
-  
+
   // Top line: Time
   yPos = 0;
-  xPos = (hours > 9) ? 0 : 2;
-  sprintf(txt, "%d", hours);
-  printString(txt, digits5x8rn);
-  if (showDots) printCharX(':', digits5x8rn, xPos);
-  xPos += (hours >= 20) ? 1 : 2;
-  sprintf(txt, "%02d", minutes);
-  printString(txt, digits5x8rn);
-  sprintf(txt, "%02d", seconds);
-  printString(txt, digits3x5);
+  if (use24HourFormat) {
+    // 24-hour mode: show HH:MM (no seconds) due to 32px width constraint.
+    xPos = 0;
+    sprintf(txt, "%02d", hours24);
+    printString(txt, digits5x8rn);
+    if (showDots) printCharX(':', digits5x8rn, xPos);
+    xPos += 2;
+    sprintf(txt, "%02d", minutes);
+    printString(txt, digits5x8rn);
+  } else {
+    // 12-hour mode: show H:MM:SS (seconds fit because hour is not zero-padded)
+    xPos = (hours > 9) ? 0 : 2;
+    sprintf(txt, "%d", hours);
+    printString(txt, digits5x8rn);
+    if (showDots) printCharX(':', digits5x8rn, xPos);
+    xPos += (hours >= 20) ? 1 : 2;
+    sprintf(txt, "%02d", minutes);
+    printString(txt, digits5x8rn);
+    sprintf(txt, "%02d", seconds);
+    printString(txt, digits3x5);
+  }
   
   // Bottom line: Temperature and Humidity
   yPos = 1;
@@ -696,6 +637,9 @@ void displayTimeAndTemp() {
 void displayTimeLarge() {
   clr();
   yPos = 0;
+
+  // This mode uses a larger time font. Keep existing 12-hour rendering.
+  // (24-hour support here would require more layout work than the 8px modes.)
   xPos = (hours > 9) ? 0 : 3;
   sprintf(txt, "%d", hours);
   printString(txt, digits5x16rn);
@@ -709,18 +653,30 @@ void displayTimeLarge() {
 
 void displayTimeAndDate() {
   clr();
-  
+
   // Top line: Time
   yPos = 0;
-  xPos = (hours > 9) ? 0 : 2;
-  sprintf(txt, "%d", hours);
-  printString(txt, digits5x8rn);
-  if (showDots) printCharX(':', digits5x8rn, xPos);
-  xPos += (hours >= 20) ? 1 : 2;
-  sprintf(txt, "%02d", minutes);
-  printString(txt, digits5x8rn);
-  sprintf(txt, "%02d", seconds);
-  printString(txt, digits3x5);
+  if (use24HourFormat) {
+    // 24-hour mode: show HH:MM (no seconds) due to 32px width constraint.
+    xPos = 0;
+    sprintf(txt, "%02d", hours24);
+    printString(txt, digits5x8rn);
+    if (showDots) printCharX(':', digits5x8rn, xPos);
+    xPos += 2;
+    sprintf(txt, "%02d", minutes);
+    printString(txt, digits5x8rn);
+  } else {
+    // 12-hour mode: show H:MM:SS
+    xPos = (hours > 9) ? 0 : 2;
+    sprintf(txt, "%d", hours);
+    printString(txt, digits5x8rn);
+    if (showDots) printCharX(':', digits5x8rn, xPos);
+    xPos += (hours >= 20) ? 1 : 2;
+    sprintf(txt, "%02d", minutes);
+    printString(txt, digits5x8rn);
+    sprintf(txt, "%02d", seconds);
+    printString(txt, digits3x5);
+  }
   
   // Bottom line: Date
   yPos = 1;
@@ -777,10 +733,13 @@ bool syncNTP() {
 void updateTime() {
   time_t now = time(nullptr);
   struct tm* timeinfo = localtime(&now);
-  
-  // Convert to 12-hour format
-  int h24 = timeinfo->tm_hour;
-  hours = (h24 == 0) ? 12 : (h24 > 12) ? h24 - 12 : h24;
+
+  // Keep 24-hour time for schedule logic
+  hours24 = timeinfo->tm_hour;
+
+  // Convert to 12-hour format for display rendering
+  hours = (hours24 == 0) ? 12 : (hours24 > 12) ? hours24 - 12 : hours24;
+
   minutes = timeinfo->tm_min;
   seconds = timeinfo->tm_sec;
   day = timeinfo->tm_mday;
@@ -846,22 +805,44 @@ void updateSensorData() {
 
 // ======================== BRIGHTNESS & MOTION ========================
 
-bool isWithinScheduleWindow() {
-  if (!displayScheduleEnabled) return true;  // Schedule disabled, always within window
-  
-  // Convert current time to minutes since midnight
-  int currentMinutes = hours * 60 + minutes;
-  int scheduleStartMinutes = scheduleStartHour * 60 + scheduleStartMinute;
-  int scheduleEndMinutes = scheduleEndHour * 60 + scheduleEndMinute;
-  
-  // Handle case where schedule spans midnight (e.g., 10 PM to 6 AM)
-  if (scheduleStartMinutes <= scheduleEndMinutes) {
-    // Normal case: start < end (e.g., 6 AM to 11 PM)
-    return currentMinutes >= scheduleStartMinutes && currentMinutes < scheduleEndMinutes;
-  } else {
-    // Schedule spans midnight: start > end (e.g., 11 PM to 6 AM)
-    return currentMinutes >= scheduleStartMinutes || currentMinutes < scheduleEndMinutes;
+int computeAmbientBrightnessFromLdr(int ldrValue) {
+  // Inverted mapping: darker -> lower brightness, brighter -> higher brightness
+  return 15 - map(constrain(ldrValue, 0, 1023), 0, 1023, 1, 15);
+}
+
+void applyDisplayHardwareState(bool on, int intensity) {
+  // Intensity is only meaningful when ON. Clamp defensively.
+  int clamped = constrain(intensity, 0, 15);
+
+  sendCmdAll(CMD_SHUTDOWN, on ? 1 : 0);
+  if (on) {
+    sendCmdAll(CMD_INTENSITY, clamped);
   }
+}
+
+// Returns true when we are inside the scheduled OFF period.
+// NOTE: Schedule inputs are in 24-hour time.
+bool isWithinScheduleOffWindow() {
+  if (!scheduleOffEnabled) return false;  // Schedule disabled => no forced off window
+
+  // If start==end, treat as "no scheduled off time" to avoid accidental 24h shutdown.
+  if (scheduleOffStartHour == scheduleOffEndHour && scheduleOffStartMinute == scheduleOffEndMinute) {
+    return false;
+  }
+
+  // Convert current time to minutes since midnight
+  int currentMinutes = hours24 * 60 + minutes;
+  int offStartMinutes = scheduleOffStartHour * 60 + scheduleOffStartMinute;
+  int offEndMinutes = scheduleOffEndHour * 60 + scheduleOffEndMinute;
+
+  // Handle case where OFF window spans midnight (e.g., 22:00 -> 06:00)
+  if (offStartMinutes < offEndMinutes) {
+    // Normal case: same-day OFF window
+    return currentMinutes >= offStartMinutes && currentMinutes < offEndMinutes;
+  }
+
+  // Wrap-midnight case
+  return currentMinutes >= offStartMinutes || currentMinutes < offEndMinutes;
 }
 
 void handleBrightnessAndMotion() {
@@ -869,10 +850,10 @@ void handleBrightnessAndMotion() {
   if (millis() - startupTime < STARTUP_GRACE_PERIOD) {
     displayOn = true;
     displayTimer = DISPLAY_TIMEOUT;  // Reset display timer to keep it on
-    sendCmdAll(CMD_SHUTDOWN, 1);
-    int ambientBrightness = 15 - map(constrain(analogRead(LDR_PIN), 0, 1023), 0, 1023, 1, 15);
+
+    int ambientBrightness = computeAmbientBrightnessFromLdr(analogRead(LDR_PIN));
     brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
-    sendCmdAll(CMD_INTENSITY, brightness);
+    applyDisplayHardwareState(true, brightness);
     return;
   }
   
@@ -889,13 +870,13 @@ void handleBrightnessAndMotion() {
   previousLightLevel = lightLevel;  // Always update for next comparison
   
   // Map to brightness (inverted: darker = dimmer)
-  int ambientBrightness = 15 - map(constrain(lightLevel, 0, 1023), 0, 1023, 1, 15);
+  int ambientBrightness = computeAmbientBrightnessFromLdr(lightLevel);
   
   // Check motion
   motionDetected = digitalRead(PIR_PIN);
   
-  // Check if within schedule window
-  bool withinSchedule = isWithinScheduleWindow();
+  // Check if we are inside the scheduled OFF window
+  bool withinOffWindow = isWithinScheduleOffWindow();
   
   // Check if manual override timeout has expired
   if (displayManualOverride && millis() > displayManualOverrideTimeout) {
@@ -908,39 +889,45 @@ void handleBrightnessAndMotion() {
     // Manual override is active - only adjust brightness if on, don't change on/off state
     if (displayOn) {
       brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
-      sendCmdAll(CMD_INTENSITY, brightness);
+      applyDisplayHardwareState(true, brightness);
     }
     return;
   }
   
-  if (withinSchedule && motionDetected) {
-    // Motion detected and within schedule - turn on and reset timer
+  // If inside OFF window, schedule always wins: force display off
+  if (withinOffWindow) {
+    if (displayOn) {
+      displayOn = false;
+      applyDisplayHardwareState(false, 0);
+      DEBUG(Serial.printf("Display forced OFF by schedule (%02d:%02d-%02d:%02d)\n",
+                          scheduleOffStartHour, scheduleOffStartMinute,
+                          scheduleOffEndHour, scheduleOffEndMinute));
+    }
+    displayTimer = 0;
+    return;
+  }
+
+  // Outside OFF window => normal motion/timer behavior
+  if (motionDetected) {
+    // Motion detected - turn on and reset timer
     displayTimer = DISPLAY_TIMEOUT;
     displayOn = true;
     // Use manual brightness if override is enabled, otherwise use ambient
     brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
-    sendCmdAll(CMD_SHUTDOWN, 1);
-    sendCmdAll(CMD_INTENSITY, brightness);
-  } else if (!withinSchedule && displayScheduleEnabled) {
-    // Outside schedule window and schedule is enabled - force display off
-    if (displayOn) {
-      displayOn = false;
-      sendCmdAll(CMD_SHUTDOWN, 0);
-    }
-    displayTimer = 0;
+    applyDisplayHardwareState(true, brightness);
   } else {
-    // Within schedule but no motion - countdown
+    // No motion - countdown
     if (displayTimer > 0) {
       displayTimer--;
       // Fade out gradually (respect manual override if set)
       int targetBrightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
       brightness = map(displayTimer, 0, DISPLAY_TIMEOUT, 1, targetBrightness);
-      sendCmdAll(CMD_INTENSITY, brightness);
+      applyDisplayHardwareState(true, brightness);
     } else {
       // Timer expired - turn off
       if (displayOn) {
         displayOn = false;
-        sendCmdAll(CMD_SHUTDOWN, 0);
+        applyDisplayHardwareState(false, 0);
       }
       displayTimer = 0;
     }
@@ -952,9 +939,10 @@ void handleBrightnessAndMotion() {
 void setupWebServer() {
   // Root page
   server.on("/", []() {
-    String html = "<html><head><title>LED Clock</title>";
+    String html = "<!DOCTYPE html><html><head><title>LED Clock</title>";
     html += "<meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    html += "<link rel='icon' href='data:,'>";
     html += "<link href='https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap' rel='stylesheet'>";
     html += "<style>body{font-family:Arial;margin:20px;background:#f0f0f0;}";
     html += ".card{background:white;padding:20px;margin:10px;border-radius:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}";
@@ -964,51 +952,148 @@ void setupWebServer() {
     html += ".light-container{display:flex;align-items:center;gap:10px;margin:10px 0;}";
     html += ".light-icon{font-size:24px;min-width:30px;text-align:center;}";
     html += ".light-bar-bg{flex-grow:1;height:30px;background:#e0e0e0;border-radius:15px;overflow:hidden;position:relative;}";
-    html += ".light-bar-fill{height:100%;background:linear-gradient(90deg,#1a1a1a 0%,#ffeb3b 50%,#fff9c4 100%);transition:width 0.3s ease;border-radius:15px;}</style>";
+    html += ".light-bar-fill{height:100%;background:linear-gradient(90deg,#1a1a1a 0%,#ffeb3b 50%,#fff9c4 100%);transition:width 0.3s ease;border-radius:15px;}";
+    html += "#led-mirror{background:#000;padding:20px;border-radius:10px;display:inline-block;box-shadow:inset 0 0 20px rgba(0,0,0,0.5);position:relative;}";
+    html += "#led-canvas{image-rendering:pixelated;image-rendering:-moz-crisp-edges;image-rendering:crisp-edges;}";
+    html += "#display-off-msg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#ff0000;font-family:'Orbitron',monospace;font-size:120px;font-weight:900;text-align:center;text-shadow:0 0 20px #ff0000,0 0 40px #ff0000;line-height:1.1;display:none;pointer-events:none;}</style>";
     html += "<script>";
-    html += "function updateTime() {";
-    html += "  fetch('/api/time').then(r => r.json()).then(d => {";
+    html += "var connErr=document.getElementById('conn-error');";
+    html += "var ledCanvas, ledCtx;";
+    html += "var isDisplayOn=true;";
+    html += "function showError(msg){if(connErr){connErr.style.display='block';connErr.innerText=msg;}}";
+    html += "function hideError(){if(connErr)connErr.style.display='none';}";
+    html += "function updateDisplay() {";
+    html += "  if(!isDisplayOn){";
+    html += "    if(!ledCanvas){ledCanvas=document.getElementById('led-canvas');if(ledCanvas) ledCtx=ledCanvas.getContext('2d');}";
+    html += "    if(ledCtx&&ledCanvas){";
+    html += "      ledCtx.clearRect(0,0,ledCanvas.width,ledCanvas.height);";
+    html += "      ledCtx.fillStyle='#000';";
+    html += "      ledCtx.fillRect(0,0,ledCanvas.width,ledCanvas.height);";
+    html += "    }";
+    html += "    return;";
+    html += "  }";
+    html += "  fetch('/api/display').then(r=>r.json()).then(d=>{";
+    html += "    if(!ledCanvas){ledCanvas=document.getElementById('led-canvas');ledCtx=ledCanvas.getContext('2d');}";
+    html += "    if(!ledCanvas) return;";
+    html += "    let w=d.width,h=d.height;";
+    html += "    ledCanvas.width=w;ledCanvas.height=h;";
+    html += "    let imgData=ledCtx.createImageData(w,h);";
+    html += "    let pixels=d.pixels;";
+    html += "    for(let i=0;i<pixels.length;i++){";
+    html += "      let isOn=pixels[i]==='1';";
+    html += "      let r=isOn?255:0;";
+    html += "      imgData.data[i*4]=r;";
+    html += "      imgData.data[i*4+1]=0;";
+    html += "      imgData.data[i*4+2]=0;";
+    html += "      imgData.data[i*4+3]=255;";
+    html += "    }";
+    html += "    ledCtx.putImageData(imgData,0,0);";
+    html += "  }).catch(e=>console.log('Display update failed'));";
+    html += "}";
+    html += "function updateAll() {";
+    html += "  fetch('/api/all').then(r=>r.json()).then(d=>{";
+    html += "    hideError();";
     html += "    document.getElementById('time-display').innerText = d.time;";
     html += "    document.getElementById('date-display').innerText = d.date;";
-    html += "  });";
-    html += "}";
-    html += "function updateStatus() {";
-    html += "  fetch('/api/status').then(r => r.json()).then(d => {";
     html += "    document.getElementById('display-status').innerText = d.display;";
+    html += "    let displayOn = d.display === 'ON';";
+    html += "    isDisplayOn = displayOn;";
+    html += "    let displayBtn = document.getElementById('display-toggle-button');";
+    html += "    let offMsg = document.getElementById('display-off-msg');";
+    html += "    if(offMsg) offMsg.style.display = displayOn ? 'none' : 'block';";
+    html += "    if(!displayOn){";
+    html += "      if(!ledCanvas){ledCanvas=document.getElementById('led-canvas');if(ledCanvas) ledCtx=ledCanvas.getContext('2d');}";
+    html += "      if(ledCtx&&ledCanvas){";
+    html += "        ledCtx.clearRect(0,0,ledCanvas.width,ledCanvas.height);";
+    html += "        ledCtx.fillStyle='#000';";
+    html += "        ledCtx.fillRect(0,0,ledCanvas.width,ledCanvas.height);";
+    html += "      }";
+    html += "    }";
+    html += "    if (displayBtn) displayBtn.innerText = displayOn ? 'Turn OFF' : 'Turn ON';";
     html += "    document.getElementById('motion-status').innerText = d.motion;";
     html += "    document.getElementById('brightness-status').innerText = d.brightness + '/15';";
+    html += "    document.getElementById('ldr-status').innerText = d.light;";
     html += "    let lightPercent = 100 - Math.round((d.light / 1023) * 100);";
     html += "    document.getElementById('light-bar').style.width = lightPercent + '%';";
-    html += "    document.getElementById('brightness-mode-status').innerText = d.mode === 'Manual' ? 'Manual' : 'Automatic';";
+    html += "    let manualMode = d.mode === 'Manual';";
+    html += "    document.getElementById('brightness-mode-status').innerText = manualMode ? 'Manual' : 'Automatic';";
+    html += "    document.getElementById('brightness-mode-button').innerText = manualMode ? 'Switch to Auto' : 'Switch to Manual';";
+    html += "    let manualControl = document.getElementById('manual-brightness-control');";
+    html += "    if (manualControl) {";
+    html += "      manualControl.style.display = manualMode ? 'block' : 'none';";
+    html += "      if (manualMode) {";
+    html += "        let slider = document.getElementById('manual-brightness-slider');";
+    html += "        if (slider) slider.value = d.manual_brightness;";
+    html += "      }";
+    html += "    }";
+    html += "    let timeFormat = document.getElementById('time-format-display');";
+    html += "    if (timeFormat) timeFormat.innerText = d.use_24_hour ? '24-hour' : '12-hour';";
+    html += "    let timeFormatBtn = document.getElementById('time-format-button');";
+    html += "    if (timeFormatBtn) timeFormatBtn.innerText = d.use_24_hour ? 'Switch to 12-hour' : 'Switch to 24-hour';";
     html += "    document.getElementById('temp-unit-display').innerHTML = d.temp_unit;";
+    html += "    let tempBtn = document.getElementById('temperature-button');";
+    html += "    if (tempBtn) tempBtn.innerText = d.temp_unit_short === 'F' ? 'Switch to Celsius' : 'Switch to Fahrenheit';";
     html += "    if (d.sensor_available) {";
     html += "      document.getElementById('sensor-data').innerHTML = 'Temperature: ' + d.temperature + '&deg;' + d.temp_unit_short + ' | Humidity: ' + d.humidity + '% | Pressure: ' + d.pressure + ' hPa';";
     html += "    }";
     html += "    let scheduleNotice = document.getElementById('schedule-notice');";
-    html += "    if (d.schedule_disabled || d.outside_schedule) {";
+    html += "    if (!d.schedule_enabled || d.within_schedule) {";
     html += "      scheduleNotice.style.display = 'block';";
-    html += "      scheduleNotice.innerText = d.outside_schedule ? 'Display OFF: Outside scheduled hours (' + d.schedule_start + '-' + d.schedule_end + ')' : 'Schedule: Disabled';";
+    html += "      scheduleNotice.innerText = d.within_schedule ? 'Display OFF: Scheduled (' + d.schedule_start + '-' + d.schedule_end + ')' : 'Schedule: Disabled';";
     html += "    } else {";
     html += "      scheduleNotice.style.display = 'none';";
     html += "    }";
-    html += "  });";
+    html += "    let tzName = document.getElementById('timezone-name');";
+    html += "    if (tzName && d.timezone_name) tzName.innerText = d.timezone_name;";
+    html += "    if(d.light_changed) updateAll();";
+    html += "  }).catch(e=>showError('Connection lost - retrying...'));";
     html += "}";
-    html += "function checkLightChange() {";
-    html += "  fetch('/api/light-change').then(r => r.json()).then(d => {";
-    html += "    if (d.light_changed) {";
-    html += "      updateStatus();";
-    html += "    }";
-    html += "  });";
+    html += "function toggleDisplay() {";
+    html += "  fetch('/display?mode=toggle').then(()=>updateAll()).catch(e=>showError('Request failed'));";
     html += "}";
-    html += "setInterval(checkLightChange, 2000);";
-    html += "setInterval(updateTime, 1000);";
+    html += "function toggleBrightnessMode() {";
+    html += "  fetch('/brightness?mode=toggle').then(()=>updateAll()).catch(e=>showError('Request failed'));";
+    html += "}";
+    html += "function setManualBrightness(value) {";
+    html += "  fetch('/brightness?value=' + value).then(()=>updateAll()).catch(e=>showError('Request failed'));";
+    html += "}";
+    html += "function toggleTimeFormat() {";
+    html += "  fetch('/timeformat?mode=toggle').then(()=>updateAll()).catch(e=>showError('Request failed'));";
+    html += "}";
+    html += "function toggleTemperatureUnit() {";
+    html += "  fetch('/temperature?mode=toggle').then(()=>updateAll()).catch(e=>showError('Request failed'));";
+    html += "}";
+    html += "function setTimezone() {";
+    html += "  let tz = document.getElementById('tz-select').value;";
+    html += "  fetch('/timezone?tz=' + tz).then(()=>updateAll()).catch(e=>showError('Request failed'));";
+    html += "}";
+    html += "function saveSchedule() {";
+    html += "  let en = document.getElementById('sched-enabled').checked ? '1' : '0';";
+    html += "  let sh = document.getElementById('sched-start-hour').value;";
+    html += "  let sm = document.getElementById('sched-start-min').value;";
+    html += "  let eh = document.getElementById('sched-end-hour').value;";
+    html += "  let em = document.getElementById('sched-end-min').value;";
+    html += "  fetch('/schedule?enabled=' + en + '&start_hour=' + sh + '&start_min=' + sm + '&end_hour=' + eh + '&end_min=' + em)";
+    html += "    .then(()=>updateAll()).catch(e=>showError('Request failed'));";
+    html += "}";
+    html += "window.addEventListener('load', function() {";
+    html += "  connErr=document.getElementById('conn-error');";
+    html += "  updateAll();";
+    html += "  updateDisplay();";
+    html += "  setInterval(updateAll, 2000);";
+    html += "  setInterval(updateDisplay, 500);";
+    html += "});";
     html += "</script>";
     html += "</head><body>";
     html += "<h1>LED Matrix Clock</h1>";
-    html += "<div class='card'><h2>Current Time & Environment</h2>";
-    html += "<p class='digital-time' id='time-display'>" + String(hours) + ":" + 
+    html += "<div class='card'><h2>Current Time (<span id='timezone-name'>" + String(timezones[currentTimezone].name) + "</span>) &amp; Environment</h2>";
+    html += "<p class='digital-time' id='time-display'>" + String(hours) + ":" +
             (minutes < 10 ? "0" : "") + String(minutes) + ":" +
-            (seconds < 10 ? "0" : "") + String(seconds) + "</p>";
+            (seconds < 10 ? "0" : "") + String(seconds);
+    if (!use24HourFormat) {
+      html += (hours24 < 12) ? " AM" : " PM";
+    }
+    html += "</p>";
     html += "<p class='digital-date' id='date-display'>" + String(day) + "/" + String(month) + "/" + String(year) + "</p>";
     
     if (sensorAvailable) {
@@ -1029,19 +1114,27 @@ void setupWebServer() {
     html += "<span class='light-icon'>☀️</span>";
     html += "</div>";
     html += "</div>";
-    
+
+    html += "<div class='card'><h2>LED Display Mirror</h2>";
+    html += "<p style='color:#666;font-size:14px;'>Live display - Updates every 500ms | 32×16 LED Matrix</p>";
+    html += "<div id='led-mirror'>";
+    html += "<canvas id='led-canvas' width='32' height='16' style='width:640px;height:320px;'></canvas>";
+    html += "<div id='display-off-msg'>Display<br>Off</div>";
+    html += "</div></div>";
+
     html += "<div class='card'><h2>Status &amp; Configuration</h2>";
-    html += "<p style='color:red;font-weight:bold;' id='schedule-notice' style='display:none;'></p>";
+    html += "<p style='color:red;font-weight:bold;display:none;' id='conn-error'></p>";
+    html += "<p style='color:red;font-weight:bold;display:none;' id='schedule-notice'></p>";
     
     // Status items
     html += "<h3 style='margin-top:0;'>Status</h3>";
     html += "<p>Display: <span id='display-status'>" + String(displayOn ? "ON" : "OFF") + "</span> ";
-    html += "<button onclick=\"fetch('/display?mode=toggle').then(() => location.reload())\" style='padding:5px 10px;cursor:pointer;'>";
+    html += "<button id='display-toggle-button' onclick=\"toggleDisplay()\" style='padding:5px 10px;cursor:pointer;'>";
     html += String(displayOn ? "Turn OFF" : "Turn ON");
     html += "</button></p>";
     html += "<p>Motion: <span id='motion-status'>" + String(motionDetected ? "Detected" : "None") + "</span></p>";
     html += "<p>Display Brightness: <span id='brightness-mode-status'>" + String(brightnessManualOverride ? "Manual" : "Automatic") + "</span> ";
-    html += "<button onclick=\"fetch('/brightness?mode=toggle').then(() => location.reload())\" style='padding:5px 10px;cursor:pointer;'>";
+    html += "<button id='brightness-mode-button' onclick=\"toggleBrightnessMode()\" style='padding:5px 10px;cursor:pointer;'>";
     html += String(brightnessManualOverride ? "Switch to Auto" : "Switch to Manual");
     html += "</button></p>";
     
@@ -1051,41 +1144,47 @@ void setupWebServer() {
     
     // Brightness Control Section
     html += "<h4 style='margin-top:10px;margin-bottom:5px;'>Brightness Control</h4>";
-    html += "<p>Display Brightness: <span id='brightness-status'>" + String(brightness) + "/15</span></p>";
-    if (brightnessManualOverride) {
-      html += "<p><label>Manual Brightness: <input type='range' min='1' max='15' value='" + String(manualBrightness) + "' onchange=\"fetch('/brightness?value=' + this.value).then(() => updateStatus())\"></label></p>";
-    }
+    html += "<p>LDR Raw Reading: <span id='ldr-status'>" + String(lightLevel) + "</span>, calculating Display Brightness to: <span id='brightness-status'>" + String(brightness) + "/15</span></p>";
+    html += "<div id='manual-brightness-control' style='" + String(brightnessManualOverride ? "" : "display:none;") + "margin-top:5px;'>";
+    html += "<p><label>Manual Brightness: <input type='range' min='1' max='15' id='manual-brightness-slider' value='" + String(manualBrightness) + "' onchange=\"setManualBrightness(this.value)\"></label></p>";
+    html += "</div>";
     
+    // Time Format Section
+    html += "<h4 style='margin-top:15px;margin-bottom:5px;'>Time Format</h4>";
+    html += "<p>LED Matrix Format: <strong id='time-format-display'>" + String(use24HourFormat ? "24-hour" : "12-hour") + "</strong> ";
+    html += "<button id='time-format-button' onclick=\"toggleTimeFormat()\" style='padding:5px 10px;cursor:pointer;'>";
+    html += String(use24HourFormat ? "Switch to 12-hour" : "Switch to 24-hour");
+    html += "</button></p>";
+    html += "<p style='font-size:12px;color:#666;margin-top:-5px;'>";
+    html += "Note: In 24-hour mode the LED matrix shows HH:MM (no seconds) due to 32px display width limitations.";
+    html += "</p>";
+
     // Temperature Unit Section
     html += "<h4 style='margin-top:15px;margin-bottom:5px;'>Temperature Unit</h4>";
     html += "<p>Current Unit: <span id='temp-unit-display'>" + String(useFahrenheit ? "Fahrenheit (&deg;F)" : "Celsius (&deg;C)") + "</span> ";
-    html += "<button onclick=\"fetch('/temperature?mode=toggle').then(() => location.reload())\" style='padding:5px 10px;cursor:pointer;'>";
+    html += "<button id='temperature-button' onclick=\"toggleTemperatureUnit()\" style='padding:5px 10px;cursor:pointer;'>";
     html += String(useFahrenheit ? "Switch to Celsius" : "Switch to Fahrenheit");
     html += "</button></p>";
     
-    // Timezone Selection Section
+    // Timezone Selection Section (auto-updates on change)
     html += "<h4 style='margin-top:15px;margin-bottom:5px;'>Timezone</h4>";
-    html += "<form method='POST' action='/timezone'>";
-    html += "<p><label>Select Timezone: <select name='tz' style='padding:5px;'>";
+    html += "<p><label>Select Timezone: <select id='tz-select' onchange='setTimezone()' style='padding:5px;'>";
     for (int i = 0; i < numTimezones; i++) {
       html += "<option value='" + String(i) + "'" + String(i == currentTimezone ? " selected" : "") + ">";
       html += String(timezones[i].name);
       html += "</option>";
     }
-    html += "</select></label> ";
-    html += "<button type='submit' style='padding:5px 10px;cursor:pointer;'>Update Timezone</button></p>";
-    html += "</form>";
+    html += "</select></label></p>";
     
-    // Display Schedule Section
+    // Display Schedule Section (AJAX, no form POST)
     html += "<h4 style='margin-top:15px;margin-bottom:5px;'>Display Schedule</h4>";
-    html += "<form method='POST' action='/schedule'>";
-    html += "<p><label><input type='checkbox' name='enabled' value='1' " + String(displayScheduleEnabled ? "checked" : "") + "> Enable Schedule</label></p>";
-    html += "<p><label>Turn On: <input type='number' name='start_hour' min='0' max='23' value='" + String(scheduleStartHour) + "' style='width:50px;'>:";
-    html += "<input type='number' name='start_min' min='0' max='59' value='" + String(scheduleStartMinute < 10 ? "0" : "") + String(scheduleStartMinute) + "' style='width:50px;'></label></p>";
-    html += "<p><label>Turn Off: <input type='number' name='end_hour' min='0' max='23' value='" + String(scheduleEndHour) + "' style='width:50px;'>:";
-    html += "<input type='number' name='end_min' min='0' max='59' value='" + String(scheduleEndMinute < 10 ? "0" : "") + String(scheduleEndMinute) + "' style='width:50px;'></label></p>";
-    html += "<p><button type='submit'>Save Schedule</button></p>";
-    html += "</form></div>";
+    html += "<p><label><input type='checkbox' id='sched-enabled' " + String(scheduleOffEnabled ? "checked" : "") + "> Enable Schedule</label></p>";
+    html += "<p><label>Turn OFF from: <input type='number' id='sched-start-hour' min='0' max='23' value='" + String(scheduleOffStartHour) + "' style='width:50px;'>:";
+    html += "<input type='number' id='sched-start-min' min='0' max='59' value='" + String(scheduleOffStartMinute < 10 ? "0" : "") + String(scheduleOffStartMinute) + "' style='width:50px;'></label></p>";
+    html += "<p><label>Turn ON at: <input type='number' id='sched-end-hour' min='0' max='23' value='" + String(scheduleOffEndHour) + "' style='width:50px;'>:";
+    html += "<input type='number' id='sched-end-min' min='0' max='59' value='" + String(scheduleOffEndMinute < 10 ? "0" : "") + String(scheduleOffEndMinute) + "' style='width:50px;'></label></p>";
+    html += "<p><button onclick='saveSchedule()' style='padding:5px 10px;cursor:pointer;'>Save Schedule</button></p>";
+    html += "</div>";
     
     html += "<div class='card'><p><a href='/reset'>Reset WiFi Settings</a></p></div>";
     html += "</body></html>";
@@ -1093,38 +1192,95 @@ void setupWebServer() {
     server.send(200, "text/html", html);
   });
   
-  // API endpoint for time data (JSON)
-  server.on("/api/time", []() {
+  // Display buffer API endpoint - returns current LED matrix state
+  // This mimics the refreshAllRot90() logic to properly decode the buffer
+  server.on("/api/display", []() {
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+    // Build a properly oriented pixel buffer based on rotation
+    String pixelData = "";
+    pixelData.reserve(LINE_WIDTH * 16);  // 32x16 = 512 pixels
+
+#if ROTATE==90
+    // For 90-degree rotation with 8 modules arranged as 4×2 (32×16 display)
+    // Modules are numbered 0-7, with 0-3 being top row, 4-7 being bottom row
+    for (int y = 0; y < 16; y++) {
+      for (int x = 0; x < LINE_WIDTH; x++) {
+        // Determine which module (4 modules across, 2 modules down)
+        int moduleCol = x / 8;        // 0-3
+        int moduleRow = y / 8;        // 0-1
+        int moduleIdx = moduleRow * 4 + moduleCol;  // 0-7
+
+        int colInModule = x % 8;
+        int rowInModule = y % 8;
+
+        // For rotation 90, we need to invert the bit order
+        // The mask should start from 0x01 and shift left, not from 0x80
+        byte mask = 0x01 << rowInModule;
+        int byteOffset = moduleIdx * 8 + colInModule;
+
+        bool isOn = (scr[byteOffset] & mask) != 0;
+        pixelData += isOn ? "1" : "0";
+      }
+    }
+#else
+    // For no rotation
+    for (int y = 0; y < 16; y++) {
+      for (int x = 0; x < LINE_WIDTH; x++) {
+        int moduleCol = x / 8;
+        int moduleRow = y / 8;
+        int moduleIdx = moduleRow * 4 + moduleCol;
+
+        int colInModule = x % 8;
+        int rowInModule = y % 8;
+
+        byte mask = 1 << rowInModule;
+        int byteOffset = moduleIdx * 8 + colInModule;
+
+        bool isOn = (scr[byteOffset] & mask) != 0;
+        pixelData += isOn ? "1" : "0";
+      }
+    }
+#endif
+
+    String json = "{\"pixels\":\"";
+    json += pixelData;
+    json += "\",\"width\":32,\"height\":16}";
+
+    server.send(200, "application/json", json);
+  });
+
+  // Combined API endpoint for all data (time + status + light change)
+  server.on("/api/all", []() {
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+    bool withinOffWindow = isWithinScheduleOffWindow();
+    int displayTemp = getDisplayTemperature();
+
     String json = "{\"time\":\"";
     json += String(hours) + ":";
     json += (minutes < 10 ? "0" : "") + String(minutes) + ":";
     json += (seconds < 10 ? "0" : "") + String(seconds);
+    // Add AM/PM for 12-hour mode
+    if (!use24HourFormat) {
+      json += (hours24 < 12) ? " AM" : " PM";
+    }
     json += "\",\"date\":\"";
     json += String(day) + "/" + String(month) + "/" + String(year);
-    json += "\"}";
-    server.send(200, "application/json", json);
-  });
-  
-  // API endpoint for status data (JSON)
-  server.on("/api/light-change", []() {
-    String json = "{\"light_changed\":" + String(lightLevelChanged ? "true" : "false") + "}";
-    if (lightLevelChanged) {
-      lightLevelChanged = false;  // Reset flag after reading
-    }
-    server.send(200, "application/json", json);
-  });
-  
-  server.on("/api/status", []() {
-    bool withinSchedule = isWithinScheduleWindow();
-    int displayTemp = getDisplayTemperature();
-    String json = "{\"display\":\"";
+    json += "\",\"display\":\"";
     json += String(displayOn ? "ON" : "OFF");
     json += "\",\"motion\":\"";
     json += String(motionDetected ? "Detected" : "None");
     json += "\",\"brightness\":";
     json += String(brightness);
+    json += ",\"manual_brightness\":";
+    json += String(manualBrightness);
+    json += ",\"use_24_hour\":";
+    json += String(use24HourFormat ? "true" : "false");
     json += ",\"light\":";
     json += String(lightLevel);
+    json += ",\"light_changed\":";
+    json += String(lightLevelChanged ? "true" : "false");
     json += ",\"mode\":\"";
     json += String(brightnessManualOverride ? "Manual" : "Auto");
     json += "\",\"temp_unit\":\"";
@@ -1139,17 +1295,26 @@ void setupWebServer() {
     json += String(pressure);
     json += ",\"sensor_available\":";
     json += String(sensorAvailable ? "true" : "false");
-    json += ",\"schedule_disabled\":";
-    json += String(!displayScheduleEnabled ? "true" : "false");
-    json += ",\"outside_schedule\":";
-    json += String(!withinSchedule ? "true" : "false");
+    json += ",\"schedule_enabled\":";
+    json += String(scheduleOffEnabled ? "true" : "false");
+    json += ",\"within_schedule\":";
+    json += String(withinOffWindow ? "true" : "false");
     json += ",\"schedule_start\":\"";
-    json += (scheduleStartHour < 10 ? "0" : "") + String(scheduleStartHour) + ":";
-    json += (scheduleStartMinute < 10 ? "0" : "") + String(scheduleStartMinute);
+    json += (scheduleOffStartHour < 10 ? "0" : "") + String(scheduleOffStartHour) + ":";
+    json += (scheduleOffStartMinute < 10 ? "0" : "") + String(scheduleOffStartMinute);
     json += "\",\"schedule_end\":\"";
-    json += (scheduleEndHour < 10 ? "0" : "") + String(scheduleEndHour) + ":";
-    json += (scheduleEndMinute < 10 ? "0" : "") + String(scheduleEndMinute);
+    json += (scheduleOffEndHour < 10 ? "0" : "") + String(scheduleOffEndHour) + ":";
+    json += (scheduleOffEndMinute < 10 ? "0" : "") + String(scheduleOffEndMinute);
+    json += "\",\"timezone_name\":\"";
+    json += String(timezones[currentTimezone].name);
     json += "\"}";
+
+
+    // Reset light changed flag after reading
+    if (lightLevelChanged) {
+      lightLevelChanged = false;
+    }
+
     server.send(200, "application/json", json);
   });
   
@@ -1159,9 +1324,7 @@ void setupWebServer() {
       // Toggle auto/manual mode
       brightnessManualOverride = !brightnessManualOverride;
       DEBUG(Serial.printf("Brightness mode: %s\n", brightnessManualOverride ? "Manual" : "Auto"));
-      // Redirect to home page to refresh and show change
-      server.sendHeader("Location", "/");
-      server.send(302, "text/plain", "");
+      server.send(200, "text/plain", "OK");
       return;
     }
     if (server.hasArg("value")) {
@@ -1175,22 +1338,54 @@ void setupWebServer() {
     server.send(200, "text/plain", "OK");
   });
   
+  // Time format toggle endpoint
+  server.on("/timeformat", []() {
+    if (server.hasArg("mode")) {
+      use24HourFormat = !use24HourFormat;
+      DEBUG(Serial.printf("Time format: %s\n", use24HourFormat ? "24-hour" : "12-hour"));
+
+      // Force an immediate redraw so the user sees the change instantly on the matrix
+      if (displayOn) {
+        switch (currentMode) {
+          case 0: displayTimeAndTemp(); break;
+          case 1: displayTimeLarge(); break;
+          case 2: displayTimeAndDate(); break;
+        }
+        refreshAll();
+      }
+
+      server.send(200, "text/plain", "OK");
+      return;
+    }
+    server.send(200, "text/plain", "OK");
+  });
+
   // Temperature unit toggle endpoint
   server.on("/temperature", []() {
     if (server.hasArg("mode")) {
       // Toggle Celsius/Fahrenheit
       useFahrenheit = !useFahrenheit;
       DEBUG(Serial.printf("Temperature unit: %s\n", useFahrenheit ? "Fahrenheit" : "Celsius"));
-      // Redirect to home page to refresh and show change
-      server.sendHeader("Location", "/");
-      server.send(302, "text/plain", "");
+
+      // Force an immediate redraw so the user sees the change instantly on the matrix
+      if (displayOn) {
+        switch (currentMode) {
+          case 0: displayTimeAndTemp(); break;
+          case 1: displayTimeLarge(); break;
+          case 2: displayTimeAndDate(); break;
+        }
+        refreshAll();
+      }
+
+      server.send(200, "text/plain", "OK");
       return;
     }
     server.send(200, "text/plain", "OK");
   });
   
-  // Timezone configuration endpoint
-  server.on("/timezone", HTTP_POST, []() {
+  // Timezone configuration endpoint (now accepts GET for AJAX)
+  server.on("/timezone", []() {
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     if (server.hasArg("tz")) {
       int newTimezone = server.arg("tz").toInt();
       if (newTimezone >= 0 && newTimezone < numTimezones) {
@@ -1201,9 +1396,7 @@ void setupWebServer() {
         syncNTP();
       }
     }
-    // Redirect to home page
-    server.sendHeader("Location", "/");
-    server.send(302, "text/plain", "");
+    server.send(200, "text/plain", "OK");
   });
   
   // Display on/off toggle endpoint
@@ -1213,49 +1406,55 @@ void setupWebServer() {
       displayOn = !displayOn;
       displayManualOverride = true;
       displayManualOverrideTimeout = millis() + DISPLAY_MANUAL_OVERRIDE_DURATION;
-      
+
+      // Take a fresh LDR reading so turning ON picks a sane intensity immediately,
+      // rather than relying on a potentially stale `lightLevel` value.
+      int ldrNow = analogRead(LDR_PIN);
+      lightLevel = ldrNow;
+
       if (displayOn) {
-        sendCmdAll(CMD_SHUTDOWN, 1);
-        brightness = brightnessManualOverride ? manualBrightness : lightLevel / 512 * 15;
-        sendCmdAll(CMD_INTENSITY, brightness);
+        int ambientBrightness = computeAmbientBrightnessFromLdr(ldrNow);
+        brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
+        applyDisplayHardwareState(true, brightness);
         DEBUG(Serial.printf("Display toggled ON (manual override for 5 minutes)\n"));
       } else {
-        sendCmdAll(CMD_SHUTDOWN, 0);
+        applyDisplayHardwareState(false, 0);
         DEBUG(Serial.printf("Display toggled OFF (manual override for 5 minutes)\n"));
       }
-      // Redirect to home page to refresh and show change
-      server.sendHeader("Location", "/");
-      server.send(302, "text/plain", "");
+      server.send(200, "text/plain", "OK");
       return;
     }
     server.send(200, "text/plain", "OK");
   });
   
-  // Schedule configuration endpoint
-  server.on("/schedule", HTTP_POST, []() {
-    displayScheduleEnabled = server.hasArg("enabled");
+  // Schedule configuration endpoint (now accepts GET for AJAX)
+  server.on("/schedule", []() {
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    
+    // Check for 'enabled' param - if present and '1', enable; otherwise disable
+    if (server.hasArg("enabled")) {
+      scheduleOffEnabled = (server.arg("enabled") == "1");
+    }
     
     if (server.hasArg("start_hour")) {
-      scheduleStartHour = constrain(server.arg("start_hour").toInt(), 0, 23);
+      scheduleOffStartHour = constrain(server.arg("start_hour").toInt(), 0, 23);
     }
     if (server.hasArg("start_min")) {
-      scheduleStartMinute = constrain(server.arg("start_min").toInt(), 0, 59);
+      scheduleOffStartMinute = constrain(server.arg("start_min").toInt(), 0, 59);
     }
     if (server.hasArg("end_hour")) {
-      scheduleEndHour = constrain(server.arg("end_hour").toInt(), 0, 23);
+      scheduleOffEndHour = constrain(server.arg("end_hour").toInt(), 0, 23);
     }
     if (server.hasArg("end_min")) {
-      scheduleEndMinute = constrain(server.arg("end_min").toInt(), 0, 59);
+      scheduleOffEndMinute = constrain(server.arg("end_min").toInt(), 0, 59);
     }
     
-    DEBUG(Serial.printf("Schedule updated - Enabled: %s, Start: %02d:%02d, End: %02d:%02d\n",
-                        displayScheduleEnabled ? "Yes" : "No", 
-                        scheduleStartHour, scheduleStartMinute,
-                        scheduleEndHour, scheduleEndMinute));
+    DEBUG(Serial.printf("Schedule updated - Enabled: %s, OFF: %02d:%02d-%02d:%02d\n",
+                        scheduleOffEnabled ? "Yes" : "No", 
+                        scheduleOffStartHour, scheduleOffStartMinute,
+                        scheduleOffEndHour, scheduleOffEndMinute));
     
-    // Redirect to home page to refresh
-    server.sendHeader("Location", "/");
-    server.send(302, "text/plain", "");
+    server.send(200, "text/plain", "OK");
   });
   
   // Reset WiFi
@@ -1292,19 +1491,45 @@ void printBanner() {
 
 void printStatus() {
   Serial.println("--- Status ---");
-  Serial.printf("Time: %02d:%02d:%02d | Date: %02d/%02d/%d",
-                hours, minutes, seconds, day, month, year);
+
+  // Time and Date
+  if (use24HourFormat) {
+    Serial.printf("Time: %02d:%02d:%02d | Date: %02d/%02d/%d",
+                  hours24, minutes, seconds, day, month, year);
+  } else {
+    Serial.printf("Time: %02d:%02d:%02d %s | Date: %02d/%02d/%d",
+                  hours, minutes, seconds, (hours24 < 12) ? "AM" : "PM", day, month, year);
+  }
+
+  // Sensor data
   if (sensorAvailable) {
     Serial.printf(" | Temp: %d°C | Humidity: %d%%", temperature, humidity);
   } else {
     Serial.print(" | Sensor Not Available");
   }
   Serial.println();
+
+  // Light and Brightness
   Serial.printf("Light: %d | Bright: %d\n", lightLevel, brightness);
-  Serial.printf("Motion: %s | Display: %s | Timer: %d\n",
+
+  // Motion, Display, Timer, Schedule
+  bool withinOffWindow = isWithinScheduleOffWindow();
+  String scheduleStatus;
+  if (!scheduleOffEnabled) {
+    scheduleStatus = "DISABLED";
+  } else if (withinOffWindow) {
+    scheduleStatus = "ACTIVE-OFF";  // Inside OFF window
+  } else {
+    scheduleStatus = "ACTIVE";      // Outside OFF window
+  }
+
+  Serial.printf("Motion: %s | Display: %s | Timer: %d | Schedule: %s (%02d:%02d-%02d:%02d)\n",
                 motionDetected ? "YES" : "NO",
                 displayOn ? "ON" : "OFF",
-                displayTimer);
+                displayTimer,
+                scheduleStatus.c_str(),
+                scheduleOffStartHour, scheduleOffStartMinute,
+                scheduleOffEndHour, scheduleOffEndMinute);
   Serial.println();
 }
 
