@@ -1187,6 +1187,17 @@ void setupWebServer() {
     html += "</div>";
     
     html += "<div class='card'><p><a href='/reset'>Reset WiFi Settings</a></p></div>";
+
+    // Footer information section
+    html += "<div class='card' style='text-align:center;padding:15px;margin-top:20px;'>";
+    html += "<p style='margin:5px 0;font-size:14px;color:#666;'>ESP8266 LED Matrix Clock</p>";
+    html += "<p style='margin:5px 0;'>";
+    html += "<a href='https://github.com/anthonyjclarke/ESP_LEDMatrix_32x16_NTP_Clock' target='_blank' style='color:#0066cc;text-decoration:none;margin:0 10px;'>GitHub</a> | ";
+    html += "<a href='https://bsky.app/profile/anthonyjclarke.bsky.social' target='_blank' style='color:#0066cc;text-decoration:none;margin:0 10px;'>Bluesky</a>";
+    html += "</p>";
+    html += "<p style='margin:5px 0;font-size:12px;color:#999;'>Built with ❤️ by Anthony Clarke</p>";
+    html += "</div>";
+
     html += "</body></html>";
     
     server.send(200, "text/html", html);
