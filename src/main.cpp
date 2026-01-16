@@ -13,7 +13,15 @@
  * - tidy up web interface and combine all configuration into single page
  * 
  * ======================== CHANGELOG ========================
- * 
+ *
+ * v2.8 - 16th January 2026
+ *   - Added comprehensive CLAUDE.md project documentation file
+ *   - Fixed version banner to show v2.7 (was incorrectly showing v1.0)
+ *   - Corrected I2C pin assignment comment (SDA/SCL labels were swapped)
+ *   - Updated code comments for clarity (timezone access, PROGMEM notes)
+ *   - Refactored header files: moved fonts.h, max7219.h, timezones.h to include/
+ *   - Added TODO for PROGMEM optimization of timezone array (~2KB RAM savings)
+ *
  * v2.7 - 19th December 2025
  *   - Added LED Display Mirror to Webserver (Bit of Fun!)
  *   - Timezone dropdown now auto-updates on selection change (no button needed)
@@ -21,7 +29,7 @@
  *   - Timezone name dynamically updates via AJAX when changed
  *   - Removed "Update Timezone" button for cleaner UX
  *   - Enhanced /api/all endpoint with timezone_name field
- * 
+ *
  * v2.6 - 17th December 2025
  *   - Added LDR raw reading display to Brightness Control section in web interface
  *   - Reordered brightness display to show "LDR Raw Reading: xxxx, calculating Display Brightness to: xx/15"
@@ -479,7 +487,7 @@ void setup()
   
   // Initialize I2C for BMP/BME280
   DEBUG(Serial.println("Initializing I2C and BMP/BME280 sensor..."));
-    // Initialize I2C with SDA on D1 (GPIO5) and SCL on D2 (GPIO4)
+  // Initialize I2C with SDA on D2 (GPIO4) and SCL on D1 (GPIO5)
   Wire.begin();
   delay(100);
   testSensor();
@@ -702,8 +710,8 @@ void showMessage(const char* message) {
 
 bool syncNTP() {
   DEBUG(Serial.println("Syncing with NTP servers..."));
-  
-  // Read timezone string from PROGMEM
+
+  // Get timezone string for selected timezone
   const char* tzString = timezones[currentTimezone].tzString;
   
   // Set timezone using modern TZ.h method with selected timezone
@@ -1494,7 +1502,7 @@ void configModeCallback(WiFiManager* myWiFiManager) {
 void printBanner() {
   Serial.println("\n\n");
   Serial.println("╔════════════════════════════════════════╗");
-  Serial.println("║   ESP8266 LED Matrix Clock v1.0        ║");
+  Serial.println("║   ESP8266 LED Matrix Clock v2.8        ║");
   Serial.println("║   PlatformIO Edition                   ║");
   Serial.println("╚════════════════════════════════════════╝");
   Serial.println();

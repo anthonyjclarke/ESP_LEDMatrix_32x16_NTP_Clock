@@ -31,6 +31,7 @@ struct TimezoneInfo {
 
 // Expanded timezone array with 88 global timezones
 // Organized by region: Australia, Americas, Europe, Asia, Pacific, Africa, Middle East
+// TODO: Move to PROGMEM to save ~2KB RAM (requires refactoring access code)
 const TimezoneInfo timezones[] = {
   // ==================== AUSTRALIA & OCEANIA ====================
   {"Sydney, Australia", "AEST-10AEDT,M10.1.0,M4.1.0/3"},

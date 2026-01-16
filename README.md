@@ -16,6 +16,15 @@ Libraries:
 
 =========================== CHANGELOG ==========================
 
+ v2.8 - 16th January 2026
+    - Added comprehensive CLAUDE.md project documentation for AI assistant context
+    - Fixed version banner to correctly display v2.7 (was showing v1.0)
+    - Corrected I2C pin assignment comment (SDA/SCL labels were swapped in comment only)
+    - Updated code comments for improved clarity (timezone access, PROGMEM usage)
+    - Documented all compile-time configuration options in CLAUDE.md
+    - Added TODO notes for future PROGMEM optimization of timezone array (~2KB RAM savings)
+    - Code quality improvements: removed misleading comments, improved documentation
+
  v2.7 - 19th December 2025
     - Added LED Display Mirror to Webserver
     - Refactored project structure: moved fonts.h, max7219.h to include/ directory and created new timezones.h header.
