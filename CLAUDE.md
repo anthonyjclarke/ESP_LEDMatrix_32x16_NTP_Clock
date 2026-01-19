@@ -30,8 +30,9 @@ ESP_LEDMatrix_32x16_NTP_Clock/
 ├── platformio.ini          # PlatformIO build configuration
 ├── README.md               # Hardware wiring and setup instructions
 ├── CLAUDE.md              # This file - project context for Claude
+├── CHANGELOG.md           # Detailed version history (Keep a Changelog format)
 ├── src/
-│   └── main.cpp           # Main application (1547 lines, monolithic)
+│   └── main.cpp           # Main application (1550+ lines, monolithic)
 └── include/
     ├── max7219.h          # MAX7219 SPI driver with rotation support
     ├── fonts.h            # PROGMEM font bitmaps (3×5, 5×8, 5×16, 7×16)
@@ -87,7 +88,12 @@ First boot creates AP: **LED_Clock_Setup**
 - Reset via web interface at `/reset`
 
 ## Current State
-**Version 2.8 (16th January 2026)** - Production Ready
+**Version 2.8.0 (16th January 2026)** - Production Ready
+
+**Version Information:**
+- Version number defined in [src/main.cpp:4-6](src/main.cpp#L4-L6)
+- Full changelog maintained in [CHANGELOG.md](CHANGELOG.md)
+- Version displayed on serial bootup with build date/time
 
 **Working Features:**
 - ✅ NTP time synchronization with automatic DST handling

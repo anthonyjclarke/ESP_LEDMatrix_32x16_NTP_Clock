@@ -1,10 +1,16 @@
 #include "Arduino.h"
 
+// Version Information
+#define VERSION "2.8.0"
+#define BUILD_DATE __DATE__
+#define BUILD_TIME __TIME__
+
 /*
  * ESP8266 LED Matrix Clock - Modern Edition
+ * Version: 2.8.0
  * Author: Rewritten from original by Anthony Clarke
  * Acknowledgements: Original by @cbm80amiga here - https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
- * 
+ *
  * =========================== TODO ==========================
  * - Switch LDR sensitivity via web interface and On/Off
  * - get weather from online API and display on matrix and webpage using https://openweathermap.org/
@@ -13,229 +19,23 @@
  * - tidy up web interface and combine all configuration into single page
  * 
  * ======================== CHANGELOG ========================
+ * See CHANGELOG.md for complete version history
  *
- * v2.8 - 16th January 2026
- *   - Added comprehensive CLAUDE.md project documentation file
- *   - Fixed version banner to show v2.7 (was incorrectly showing v1.0)
- *   - Corrected I2C pin assignment comment (SDA/SCL labels were swapped)
- *   - Updated code comments for clarity (timezone access, PROGMEM notes)
- *   - Refactored header files: moved fonts.h, max7219.h, timezones.h to include/
- *   - Added TODO for PROGMEM optimization of timezone array (~2KB RAM savings)
+ * Current Version: 2.8.0 (2026-01-16)
+ * - Version numbering system with build date/time display
+ * - Comprehensive project documentation (CLAUDE.md, CHANGELOG.md)
+ * - Code quality improvements and documentation cleanup
  *
- * v2.7 - 19th December 2025
- *   - Added LED Display Mirror to Webserver (Bit of Fun!)
- *   - Timezone dropdown now auto-updates on selection change (no button needed)
- *   - Added current timezone name to "Current Time & Environment" heading
- *   - Timezone name dynamically updates via AJAX when changed
- *   - Removed "Update Timezone" button for cleaner UX
- *   - Enhanced /api/all endpoint with timezone_name field
- *
- * v2.6 - 17th December 2025
- *   - Added LDR raw reading display to Brightness Control section in web interface
- *   - Reordered brightness display to show "LDR Raw Reading: xxxx, calculating Display Brightness to: xx/15"
- *   - Added real-time JavaScript update for LDR reading value via AJAX
- *   - Improved user visibility into automatic brightness calculation from ambient light sensor
- * 
- * v2.5 - 16th December 2025
- *   - Refined light level UI so the bar shrinks as ambient light readings rise
- *     and swapped the gradient to run from dark (moon) to bright (sun).
- *   - Fixed light indicator layout by anchoring static 🌙/☀️ icons and
- *     removing the distracting raw LDR value readout.
- *   - Increased the digital time font size by 50% (48px -> 72px) for better
- *     readability on desktops and mobile devices.
- *   - Corrected the temperature unit label to render the real degree symbol and
- *     added dynamic °C/°F suffixes to the sensor data line.
- *   - Extended /api/status with a compact `temp_unit_short` field so the web UI
- *     can show the currently selected unit next to live readings.
- * 
- * v2.4 - 15th December 2025
- *   - Replaced obsolete simpleDSTadjust library with modern TZ.h timezone support
- *   - Implemented POSIX TZ strings for automatic DST handling
- *   - Added support for predefined timezones (TZ_Australia_Sydney, TZ_America_New_York, etc.)
- *   - Simplified time synchronization using built-in ESP8266 timezone functions
- *   - Removed manual DST rule configuration requirements
- *   - Enhanced timezone configuration with detailed POSIX TZ string documentation
- *   - Updated configTime() to use modern TZ string parameter
- *   - Improved code maintainability by removing deprecated library dependency
- *   - Added web-based timezone selection with dropdown menu
- *   - Expanded timezone options to 88 global timezones covering all major regions
- *   - Added /timezone endpoint for dynamic timezone changes
- *   - Enabled automatic NTP re-sync when timezone is changed
- *   - Added current timezone display in NTP sync debug output
- *   - Changed display schedule default to ENABLED (was disabled)
- *   - Fixed PSTR() compilation error by using string literals instead of TZ_* macros
- * 
- * v2.3 - 15th December 2025
- *   - Added visual light level indicator with gradient bar chart and dynamic icons
- *   - Implemented emoji icons for light conditions: ☀️ (bright), ☁️ (medium), 🌙 (dark)
- *   - Reversed light bar gradient to match LDR behavior (low=bright, high=dark)
- *   - Merged Status and Configuration sections into unified "Status & Configuration" card
- *   - Converted Display ON/OFF control to button format matching other controls
- *   - Added Display Brightness mode indicator (Manual/Automatic) to Status section
- *   - Moved brightness mode toggle from Configuration to Status section
- *   - Changed Temperature Unit control to button format for consistency
- *   - Reorganized layout with clear Status and Configuration subsections
- *   - Enhanced visual consistency across all control elements
- * 
- * v2.2 - 15th December 2025
- *   - Web UI reorganization: moved Light Level from Status to Current Time & Environment section
- *   - Moved Current Brightness to Configuration > Brightness Control section
- *   - Renamed Current Brightness to Display Brightness for clarity
- *   - Enhanced time/date display with digital-style Orbitron font
- *   - Added large 48px glowing green time display with LED clock aesthetic
- *   - Added 28px blue date display with matching digital font styling
- *   - Improved visual hierarchy and information grouping in web interface
- * 
- * v2.1 - 15th December 2025
- *   - Replaced BMP280 sensor with BME280 for humidity support
- *   - Added humidity display on LED matrix and web interface (T°C H%%)
- *   - Added pressure reading to web interface display
- *   - Fixed temperature/humidity/pressure display on webpage via API endpoint
- *   - Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules) so BE AWARE
-    - Fixed character encoding issue on webpage (UTF-8 charset)
- *   - Removed unused SHT3X sensor files from project
- *   - Enhanced /api/status endpoint with sensor data (temperature, humidity, pressure)
- *   - Updated JavaScript to dynamically display sensor readings
- * 
- * v2.0 - 2025-12-14
- *   - Web UI: replaced full-page refresh with AJAX updates for time and selective
- *     Status updates to eliminate flicker.
- *   - Web API: added `/api/time` and `/api/status` JSON endpoints.
- *   - Brightness: added manual brightness override with Auto/Manual toggle and
- *     a 1–15 slider in the web interface; `/brightness` endpoint to set/toggle.
- *   - Scheduling: added display schedule (enable, start/end times) with
- *     `/schedule` form + endpoint; display respects schedule and shows a
- *     schedule notification in the web Status card when off.
- *   - Display code: fixed `NUM_MAX` header-scope issue by reordering defines
- *     before `max7219.h` include; cleaned unused variables (`fwd`, `fht`).
- *   - UI: merged Current Time and Environment into a single card; added
- *     on-demand Status refresh when brightness changes.
- *   - Misc: improved debug output and added validation for schedule inputs.
- * 
- * v1.1 - December 2025
- *   - Initial Github Repo
- *   - Migrated to PlatformIO
- *   - Sensor Code NOT Fully tested, Clock / Date and Time working
- *   - Move fonts to separate header file
- *   - Moved MAX7219 functions to separate header file
- *   - PlatformIO Version with WiFiManager
-
- * v1.0 - October 2025
- *        Complete rewrite with modern practices:
- *        - WiFiManager for easy WiFi setup (no hardcoded credentials)
- *        - BMP/BME280 I2C temperature/pressure/humidity sensor
- *        - Automatic NTP time synchronization with DST support
- *        - PIR motion sensor for auto-off/on
- *        - LDR for automatic brightness control
- *        - Clean, well-structured code with proper error handling
- *        - Comprehensive debug output
- *        - Web interface for status and configuration Status
-
-
- * DETAILED CHANGELOG SUMMARY (Co-Pilot)
- * - 2025-12-19: Added auto-update to timezone dropdown selection (onChange event handler).
- * - 2025-12-19: Removed "Update Timezone" button for cleaner UX and instant timezone changes.
- * - 2025-12-19: Added timezone_name field to /api/all JSON endpoint.
- * - 2025-12-19: Updated "Current Time & Environment" heading to include timezone name dynamically.
- * - 2025-12-19: Added JavaScript to update timezone name in heading via updateAll() function.
- * - 2025-10-XX: Initial rewrite and features (see header above for full changelog).
- * - 2025-12-13: Removed unused variable 'fwd' from font helper to fix compiler warnings.
- * - 2025-12-13: Removed unused variable 'fht' from `charWidth()` to fix compiler warning.
- * - 2025-12-13: Added concise changelog comments section at top of code.
- * - 2025-12-14: Moved NUM_MAX, LINE_WIDTH, ROTATE, and pin definitions before max7219.h include.
- * - 2025-12-14: Fixed NUM_MAX scope error in max7219.h by reordering includes/defines.
- * - 2025-12-14: Removed full-page refresh, replaced with JavaScript AJAX updates to eliminate flickering.
- * - 2025-12-14: Added /api/time endpoint for JSON time data (1-second refresh).
- * - 2025-12-14: Added /api/status endpoint for JSON status data (brightness, motion, display state).
- * - 2025-12-14: Added manual brightness override with Auto/Manual toggle in web interface.
- * - 2025-12-14: Added brightness slider (1-15) for manual brightness control.
- * - 2025-12-14: Status section now updates on-demand when brightness is changed.
- * - 2025-12-14: Added HTTP 302 redirect after brightness mode toggle to refresh page.
- * - 2025-12-14: Added display schedule configuration (start/end times, enable/disable flag).
- * - 2025-12-14: Added isWithinScheduleWindow() function for schedule validation.
- * - 2025-12-14: Updated handleBrightnessAndMotion() to respect display schedule times.
- * - 2025-12-14: Added schedule notification in web status section (shows when display is off due to schedule).
- * - 2025-12-14: Enhanced /api/status endpoint with schedule_disabled, outside_schedule, schedule_start/end fields.
- * - 2025-12-14: Added Display Schedule web form with enable/disable, start/end time inputs.
- * - 2025-12-14: Added /schedule endpoint (POST) to handle display schedule configuration updates.
- * - 2025-12-14: Merged Current Time and Environment sections on web page into single card.
- * - 2025-12-15: Replaced Adafruit_BMP280 with Adafruit_BME280 library for humidity support.
- * - 2025-12-15: Updated sensor object from bmp280 to bme280 with humidity reading capability.
- * - 2025-12-15: Changed BME280 I2C address from 0x77 to 0x76 (common default for many modules).
- * - 2025-12-15: Updated testSensor() to read and validate humidity from BME280.
- * - 2025-12-15: Updated updateSensorData() to read humidity and validate against 0-100% range.
- * - 2025-12-15: Changed LED matrix display from "T°C P[hPa]" to "T°C H[%]" format.
- * - 2025-12-15: Replaced pressure with humidity in web interface sensor display.
- * - 2025-12-15: Updated serial debug output to show humidity instead of pressure.
- * - 2025-12-15: Added UTF-8 charset meta tag to HTML head for proper character encoding.
- * - 2025-12-15: Replaced degree symbol with HTML entity (&deg;) in all webpage outputs.
- * - 2025-12-15: Enhanced /api/status endpoint with temperature, humidity, pressure, and sensor_available fields.
- * - 2025-12-15: Updated updateStatus() JavaScript function to display sensor data from API.
- * - 2025-12-15: Added sensor-data element to HTML for dynamic sensor reading updates.
- * - 2025-12-15: Removed unused WEMOS_SHT3X.cpp and WEMOS_SHT3X.h files from project.
- * - 2025-12-15: Reorganized web interface layout - moved Light Level from Status to Current Time & Environment section.
- * - 2025-12-15: Moved Current Brightness from Status section to Configuration > Brightness Control section.
- * - 2025-12-15: Renamed Current Brightness to Display Brightness for improved clarity.
- * - 2025-12-15: Added Google Fonts Orbitron font family for digital-style time/date display.
- * - 2025-12-15: Enhanced time display with 48px font size, green color, and glowing text shadow effect.
- * - 2025-12-15: Enhanced date display with 28px font size and blue color using Orbitron font.
- * - 2025-12-15: Added CSS classes .digital-time and .digital-date for consistent digital clock styling.
- * - 2025-12-15: Added visual light level bar chart with gradient fill (0-100% based on LDR reading).
- * - 2025-12-15: Implemented dynamic emoji icons for light conditions (sun, cloud, moon).
- * - 2025-12-15: Created CSS classes .light-container, .light-icon, .light-bar-bg, .light-bar-fill for light visualization.
- * - 2025-12-15: Reversed light bar gradient from light-to-dark to match LDR behavior (low=bright, high=dark).
- * - 2025-12-15: Updated icon logic so low LDR values show sun (bright), high values show moon (dark).
- * - 2025-12-15: Modified JavaScript updateStatus() to dynamically update light bar width and icon.
- * - 2025-12-15: Merged Status and Configuration sections into single "Status & Configuration" card.
- * - 2025-12-15: Added Status and Configuration subsection headers (h3) for clear organization.
- * - 2025-12-15: Converted Display ON/OFF link to button format with "Turn ON"/"Turn OFF" labels.
- * - 2025-12-15: Added Display Brightness mode (Manual/Automatic) indicator to Status section.
- * - 2025-12-15: Moved brightness mode toggle button from Configuration to Status section.
- * - 2025-12-15: Changed Brightness Control from h3 to h4 level heading under Configuration.
- * - 2025-12-15: Converted Temperature Unit control from link to button format.
- * - 2025-12-15: Changed Temperature Unit from h3 to h4 level heading under Configuration.
- * - 2025-12-15: Updated temperature toggle button text to "Switch to Celsius"/"Switch to Fahrenheit".
- * - 2025-12-15: Changed Display Schedule from h3 to h4 level heading under Configuration.
- * - 2025-12-15: Removed redundant brightness-mode span element from Configuration section.
- * - 2025-12-15: Updated JavaScript to use brightness-mode-status for Status section updates.
- * - 2025-12-15: Replaced obsolete simpleDSTadjust library with modern TZ.h timezone support.
- * - 2025-12-15: Removed #include <simpleDSTadjust.h> and added #include <TZ.h> and #include <coredecls.h>.
- * - 2025-12-15: Replaced manual TIMEZONE_OFFSET and DST_START_RULE/DST_END_RULE with POSIX TZ strings.
- * - 2025-12-15: Implemented predefined timezone macros (TZ_Australia_Sydney, TZ_America_New_York, etc.).
- * - 2025-12-15: Added comprehensive POSIX TZ string format documentation in timezone configuration.
- * - 2025-12-15: Removed struct dstRule and simpleDSTadjust object declarations from globals.
- * - 2025-12-15: Updated syncNTP() to use configTime(MY_TZ, NTP_SERVERS) instead of manual offset calculation.
- * - 2025-12-15: Simplified updateTime() function to use time(nullptr) and localtime() directly.
- * - 2025-12-15: Removed dstAdjusted.time() call and replaced with standard time functions.
- * - 2025-12-15: Added support for additional timezones (Europe, Asia) with predefined TZ constants.
- * - 2025-12-15: Documented custom TZ string format for users with non-standard timezone requirements.
- * - 2025-12-15: Added currentTimezone global variable to track selected timezone index.
- * - 2025-12-15: Created TimezoneOption struct to store timezone name and TZ string pairs.
- * - 2025-12-15: Implemented timezones[] array with 20 predefined timezone options.
- * - 2025-12-15: Added numTimezones constant for array size calculation.
- * - 2025-12-15: Updated syncNTP() to use timezones[currentTimezone].tzString for configTime().
- * - 2025-12-15: Enhanced NTP sync debug output to display selected timezone name.
- * - 2025-12-15: Added Timezone configuration section to web interface under Configuration.
- * - 2025-12-15: Implemented timezone dropdown select menu with all available options.
- * - 2025-12-15: Created /timezone POST endpoint to handle timezone changes.
- * - 2025-12-15: Added automatic NTP re-sync when timezone is changed via web interface.
- * - 2025-12-15: Implemented timezone validation (0 to numTimezones-1) in endpoint handler.
- * - 2025-12-15: Expanded timezone coverage from 20 to 88 global timezones.
- * - 2025-12-15: Fixed PSTR() compilation error by using POSIX TZ string literals instead of TZ_* macros.
- * - 2025-12-15: Changed schedule default to enabled (scheduleOffEnabled=true).
- * - 2025-12-15: Updated timezone array to use PROGMEM for flash storage to save RAM.
- * - 2025-12-15: Reworked light level UI so the bar width shrinks as readings increase and
- *               swapped the gradient direction to run dark-to-bright.
- * - 2025-12-16: Locked moon/sun icons to left/right of the light bar and removed the raw LDR value label.
- * - 2025-12-16: Increased .digital-time font size from 48px to 72px for improved readability.
- * - 2025-12-16: Switched temperature unit label rendering to use the real ° symbol instead of &deg; placeholders.
- * - 2025-12-16: Added temp_unit_short to /api/status so the sensor readout can append °C/°F dynamically.
- * - 2025-12-17: Added LDR raw reading display to Brightness Control section in web interface.
- * - 2025-12-17: Reordered brightness display to show "LDR Raw Reading: xxxx, calculating Display Brightness to: xx/15".
- * - 2025-12-17: Added ldr-status span element for dynamic LDR value updates via JavaScript.
- * - 2025-12-17: Updated updateAll() JavaScript function to refresh LDR reading from API response.
+ * Major Features (v2.x series):
+ * - Live LED matrix mirror on web interface
+ * - 88 global timezones with POSIX TZ string support
+ * - BME280 sensor (temp, humidity, pressure)
+ * - AJAX web UI with automatic updates
+ * - PIR motion detection with smart power management
+ * - LDR-based automatic brightness
+ * - Scheduled display on/off window
+ * - Manual brightness and display controls
  */
-
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <WiFiManager.h>
@@ -1502,9 +1302,13 @@ void configModeCallback(WiFiManager* myWiFiManager) {
 void printBanner() {
   Serial.println("\n\n");
   Serial.println("╔════════════════════════════════════════╗");
-  Serial.println("║   ESP8266 LED Matrix Clock v2.8        ║");
+  Serial.println("║   ESP8266 LED Matrix Clock             ║");
   Serial.println("║   PlatformIO Edition                   ║");
   Serial.println("╚════════════════════════════════════════╝");
+  Serial.println();
+  Serial.printf("Version: %s\n", VERSION);
+  Serial.printf("Build Date: %s %s\n", BUILD_DATE, BUILD_TIME);
+  Serial.printf("Author: Anthony Clarke\n");
   Serial.println();
 }
 
