@@ -241,11 +241,25 @@ ESP_LEDMatrix_32x16_NTP_Clock/
 - Check serial output for NTP errors
 - Confirm timezone setting is correct
 
-## Credits
+## Credits & Acknowledgements
 
-**Original Code:** [@cbm80amiga](https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s)
-**MAX7219 Driver:** Pawel A. Hernik
-**Modern Rewrite:** Anthony Clarke (2025-2026)
+This project is a modern rewrite and enhancement of the original work by:
+
+**Original Code:** @cbm80amiga
+- YouTube: https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
+- Original Arduino sketch and hardware design
+
+**MAX7219 Driver Functions:** Pawel A. Hernik
+- Efficient LED matrix control with rotation support
+
+**Modern Rewrite & Enhancements:** Anthony Clarke (2025-2026)
+- PlatformIO migration
+- WiFiManager integration
+- BME280 sensor support
+- Web interface with AJAX
+- 88 timezone support with POSIX TZ strings
+- Power management and scheduling
+- Comprehensive documentation
 
 ## License
 
