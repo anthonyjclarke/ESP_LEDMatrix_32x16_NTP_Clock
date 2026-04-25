@@ -32,7 +32,7 @@ ESP_LEDMatrix_32x16_NTP_Clock/
 ├── CLAUDE.md              # This file - project context for Claude
 ├── CHANGELOG.md           # Detailed version history (Keep a Changelog format)
 ├── src/
-│   └── main.cpp           # Main application (1550+ lines, monolithic)
+│   └── main.cpp           # Main application (~1360 lines, monolithic)
 └── include/
     ├── max7219.h          # MAX7219 SPI driver with rotation support
     ├── fonts.h            # PROGMEM font bitmaps (3×5, 5×8, 5×16, 7×16)
@@ -54,22 +54,22 @@ ESP_LEDMatrix_32x16_NTP_Clock/
 
 ## Configuration
 
-### Compile-time Settings (main.cpp lines 241-313)
+### Compile-time Settings (main.cpp lines 52-194)
 Key defines that may need customization:
 
 | Setting | Default | Location | Notes |
 |---------|---------|----------|-------|
-| `NUM_MAX` | 8 | Line 244 | Number of MAX7219 modules |
-| `LINE_WIDTH` | 32 | Line 245 | Display width in pixels |
-| `ROTATE` | 90 | Line 246 | Display rotation (0, 90, or 270) |
-| `DISPLAY_TIMEOUT` | 60 | Line 262 | Seconds before display turns off (no motion) |
-| `NTP_UPDATE_INTERVAL` | 600000 | Line 263 | NTP sync interval (10 minutes) |
-| `MODE_CYCLE_TIME` | 20000 | Line 264 | Display mode cycle time (20 seconds) |
-| `SENSOR_UPDATE_WITH_NTP` | true | Line 265 | Update sensor data during NTP sync |
-| `MY_TZ` | `TZ_Australia_Sydney` | Line 281 | Default timezone (see timezones.h for 88 options) |
-| `DEBUG_ENABLED` | true | Line 308 | Enable serial debug output |
-| `STARTUP_GRACE_PERIOD` | 10000 | Line 386 | Milliseconds to keep display on at boot |
-| `DISPLAY_MANUAL_OVERRIDE_DURATION` | 300000 | Line 360 | Manual toggle timeout (5 minutes) |
+| `NUM_MAX` | 8 | Line 52 | Number of MAX7219 modules |
+| `LINE_WIDTH` | 32 | Line 53 | Display width in pixels |
+| `ROTATE` | 90 | Line 54 | Display rotation (0, 90, or 270) |
+| `DISPLAY_TIMEOUT` | 60 | Line 70 | Seconds before display turns off (no motion) |
+| `NTP_UPDATE_INTERVAL` | 600000 | Line 71 | NTP sync interval (10 minutes) |
+| `MODE_CYCLE_TIME` | 20000 | Line 72 | Display mode cycle time (20 seconds) |
+| `SENSOR_UPDATE_WITH_NTP` | true | Line 73 | Update sensor data during NTP sync |
+| `MY_TZ` | `TZ_Australia_Sydney` | Line 89 | Default timezone (see timezones.h for 88 options) |
+| `DEBUG_ENABLED` | true | Line 116 | Enable serial debug output |
+| `STARTUP_GRACE_PERIOD` | 10000 | Line 194 | Milliseconds to keep display on at boot |
+| `DISPLAY_MANUAL_OVERRIDE_DURATION` | 300000 | Line 168 | Manual toggle timeout (5 minutes) |
 
 ### Runtime Configuration (via Web Interface)
 Accessible at `http://[device-ip]/`:
@@ -133,12 +133,13 @@ Main loop uses `millis()` for all timing - no blocking `delay()` except 100ms th
 - Smooth LED animations (dot blinking at 2Hz)
 
 ### Display Power Management State Machine
-Priority hierarchy (lines 848-935):
+Priority hierarchy (`handleBrightnessAndMotion()`, lines 656–743):
 1. **Startup grace period** (10 seconds): Always on
-2. **Schedule OFF window**: Forced off (overrides everything except startup)
-3. **Manual override**: User toggle via web (5-minute timeout)
-4. **Motion detection**: Auto-on with 60s countdown
-5. **Idle timeout**: Gradual fade to off
+2. **Manual override timeout**: Expires after 5 minutes, reverts to automatic control
+3. **Manual override active**: Respects user on/off toggle, no motion logic
+4. **Schedule OFF window**: Forced off (`isWithinScheduleOffWindow()`, lines 633–654)
+5. **Motion detection**: Auto-on with 60s countdown
+6. **Idle timeout**: Gradual brightness fade to off
 
 ### Memory Optimization
 - Font bitmaps in PROGMEM (flash storage): keeps ~500 bytes in SRAM
@@ -148,10 +149,22 @@ Priority hierarchy (lines 848-935):
 
 ### Web Interface Architecture
 - AJAX-based SPA (no full-page refreshes to prevent flicker)
-- `/api/all` - consolidated JSON (time, date, status, sensor data) - 2s polling
-- `/api/display` - raw pixel buffer (512 chars: "0"/"1") - 500ms polling
+- `/api/all` - consolidated JSON (time, date, status, sensor data, `light_changed` flag) - 2s polling; includes `within_schedule`, `timezone_name`, temp unit fields
+- `/api/display` - JSON `{"pixels":"<512 chars>","width":32,"height":16}` - 500ms polling; pixels are "0"/"1" chars
 - GET endpoints for instant configuration updates
 - Canvas rendering with 20× pixel scaling for LED mirror
+- Display-off overlay: "Display Off" message shown over canvas when `displayOn` is false
+- Footer with GitHub and Bluesky profile links
+- `light_changed` flag in `/api/all`: when set, client calls `updateAll()` again immediately for responsive brightness changes
+
+### Key Helper Functions
+Three focused helpers extracted from the main state machine (all in `src/main.cpp`):
+
+| Function | Line | Purpose |
+|---|---|---|
+| `computeAmbientBrightnessFromLdr(ldrValue)` | 616 | Maps raw ADC (0–1023) to brightness (1–15), inverted |
+| `applyDisplayHardwareState(on, intensity)` | 621 | Single point for `CMD_SHUTDOWN` + `CMD_INTENSITY` SPI commands |
+| `isWithinScheduleOffWindow()` | 633 | Returns true when current time falls inside scheduled OFF window; handles midnight wrap |
 
 ### Rotation Handling
 MAX7219 modules physically arranged in 4×2 grid, rotated 90° in software:
@@ -169,8 +182,9 @@ MAX7219 modules physically arranged in 4×2 grid, rotated 90° in software:
 LDR mapping is **inverted** to match real-world behavior:
 - Low LDR reading (dark room) = high resistance = low brightness
 - High LDR reading (bright room) = low resistance = high brightness
-- Formula: `brightness = 15 - map(constrain(ldrValue, 0, 1023), 0, 1023, 1, 15)` (line 810)
-- The `constrain()` ensures out-of-range ADC values don't cause issues
+- Formula: `brightness = 15 - map(constrain(ldrValue, 0, 1023), 0, 1023, 1, 15)` (`computeAmbientBrightnessFromLdr()`, line 618)
+- Hardware state (on/off + intensity) applied via `applyDisplayHardwareState()` (line 621)
+- Light level change detection: 5% threshold triggers `lightLevelChanged` flag → web `/api/all` signals client to refresh immediately
 
 ## Known Issues
 
@@ -186,7 +200,8 @@ LDR mapping is **inverted** to match real-world behavior:
 - Manual brightness override has fixed 5-minute timeout (not configurable via UI)
 
 ### Display Mode Limitations
-- Mode 1 (large time) only supports 12-hour format (insufficient space for 24-hour layout)
+- Mode 1 (large time) only supports 12-hour format; 24-hour layout does not fit at 5×16 font size
+- Mode 1 shows HH:MM in `digits5x16rn` plus seconds in small `font3x7` at the right edge
 - Font rendering is optimized for English text (no Unicode support)
 
 ## TODO
@@ -285,10 +300,10 @@ Edit `include/timezones.h`:
 4. Rebuild and upload
 
 ### Customizing Display Modes
-Edit display functions (lines 593-691):
-- `displayTimeAndTemp()` - Mode 0 (time + sensor data)
-- `displayTimeLarge()` - Mode 1 (large time only)
-- `displayTimeAndDate()` - Mode 2 (time + date)
+Edit display functions (lines 402–499):
+- `displayTimeAndTemp()` (line 402) - Mode 0 (time + sensor data)
+- `displayTimeLarge()` (line 445) - Mode 1 (large 5×16 time; 12-hour format only; seconds shown in `font3x7` at right)
+- `displayTimeAndDate()` (line 462) - Mode 2 (time + date DD/MMM/YY)
 
 Modify `MODE_CYCLE_TIME` (line 264) to adjust rotation speed.
 
