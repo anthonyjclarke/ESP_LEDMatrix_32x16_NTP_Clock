@@ -1,3 +1,4 @@
+#pragma once
 // MAX7219 functions by Pawel A. Hernik
 // 2016.12.10 updated for rotated LED Martices, define ROTATE below (0,90 or 270)
 

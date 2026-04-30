@@ -1,40 +1,13 @@
-#include "Arduino.h"
-
 // Version Information
-#define VERSION "2.8.0"
+#define VERSION "2.9.0"
 #define BUILD_DATE __DATE__
 #define BUILD_TIME __TIME__
 
 /*
  * ESP8266 LED Matrix Clock - Modern Edition
- * Version: 2.8.0
+ * Version: 2.9.0
  * Author: Rewritten from original by Anthony Clarke
  * Acknowledgements: Original by @cbm80amiga here - https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
- *
- * =========================== TODO ==========================
- * - Switch LDR sensitivity via web interface and On/Off
- * - get weather from online API and display on matrix and webpage using https://openweathermap.org/
- * - Implement web interface for full configuration
- * - Add OTA firmware update capability
- * - tidy up web interface and combine all configuration into single page
- * 
- * ======================== CHANGELOG ========================
- * See CHANGELOG.md for complete version history
- *
- * Current Version: 2.8.0 (2026-01-16)
- * - Version numbering system with build date/time display
- * - Comprehensive project documentation (CLAUDE.md, CHANGELOG.md)
- * - Code quality improvements and documentation cleanup
- *
- * Major Features (v2.x series):
- * - Live LED matrix mirror on web interface
- * - 88 global timezones with POSIX TZ string support
- * - BME280 sensor (temp, humidity, pressure)
- * - AJAX web UI with automatic updates
- * - PIR motion detection with smart power management
- * - LDR-based automatic brightness
- * - Scheduled display on/off window
- * - Manual brightness and display controls
  */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -46,79 +19,12 @@
 #include <Wire.h>
 #include <Adafruit_BME280.h>
 
-// ======================== CONFIGURATION ========================
-
-// Display Configuration (must be before max7219.h include)
-#define NUM_MAX 8                 // Number of MAX7219 modules
-#define LINE_WIDTH 32             // Display width in pixels
-#define ROTATE 90                 // Display rotation (0, 90, or 270)
-
-// Pin Definitions - MAX7219
-#define DIN_PIN 15                // D8
-#define CS_PIN  13                // D7
-#define CLK_PIN 12                // D6
-
-// Pin Definitions - Sensors
-#define PIR_PIN D3                // Motion sensor
-#define LDR_PIN A0                // Light sensor (analog)
-
+#include <ArduinoOTA.h>
+#include "config.h"   // user-tuneable constants — must come before max7219.h
+#include "debug.h"
 #include "max7219.h"
 #include "fonts.h"
 #include "timezones.h"
-
-// Timing Configuration
-#define DISPLAY_TIMEOUT 60        // Seconds before display turns off (no motion)
-#define NTP_UPDATE_INTERVAL 600000 // NTP sync interval (10 minutes)
-#define MODE_CYCLE_TIME 20000     // Display mode change interval (20 seconds)
-#define SENSOR_UPDATE_WITH_NTP true // Update temp/humidity with NTP sync
-
-// NTP Server Configuration
-#define NTP_SERVERS "pool.ntp.org", "time.nist.gov", "time.google.com"
-
-// Timezone Configuration - Defaults to Sydney, Australia - can be changed on web interface
-// Uses POSIX TZ strings for automatic DST handling
-// Format: STD offset DST [offset],start[/time],end[/time]
-//   STD = Standard timezone abbreviation
-//   offset = Hours offset from UTC (negative for west of Greenwich)
-//   DST = Daylight saving timezone abbreviation  
-//   start/end = When DST starts/ends (Mmonth.week.day/hour format)
-
-// Australia Eastern Time (Sydney, Melbourne)
-// AEST (UTC+10) / AEDT (UTC+11) - DST first Sunday in October to first Sunday in April
-
-#define MY_TZ TZ_Australia_Sydney
-
-// Alternate timezones (comment out above and uncomment one below if needed):
-// US Eastern Time (New York)
-// #define MY_TZ TZ_America_New_York
-
-// US Pacific Time (Los Angeles)
-// #define MY_TZ TZ_America_Los_Angeles
-
-// UK (London)
-// #define MY_TZ TZ_Europe_London
-
-// Central European Time (Paris, Berlin, Rome)
-// #define MY_TZ TZ_Europe_Paris
-
-// Japan (Tokyo) - No DST
-// #define MY_TZ TZ_Asia_Tokyo
-
-// Custom TZ string example if your timezone isn't predefined:
-// #define MY_TZ "AEST-10AEDT,M10.1.0,M4.1.0/3"
-// Format breakdown for Sydney:
-//   AEST-10 = Australian Eastern Standard Time, UTC+10 (negative means east)
-//   AEDT = Australian Eastern Daylight Time
-//   M10.1.0 = Month 10 (October), 1st occurrence, Sunday (0), at 2am (default)
-//   M4.1.0/3 = Month 4 (April), 1st occurrence, Sunday (0), at 3am
-
-// Debug Output
-#define DEBUG_ENABLED true        // Set to false to disable serial output
-#if DEBUG_ENABLED
-  #define DEBUG(x) x
-#else
-  #define DEBUG(x)
-#endif
 
 // ======================== OBJECTS & GLOBALS ========================
 
@@ -156,16 +62,24 @@ bool sensorAvailable = false;
 // Display Control
 int brightness = 8;
 int lightLevel = 512;
+int filteredLightLevel = 512;     // Smoothed LDR value used for auto brightness
 int previousLightLevel = 512;    // Track previous light level for change detection
 bool lightLevelChanged = false;  // Flag to trigger webpage refresh on significant light change
+bool ldrFilterInitialized = false;
+bool autoBrightnessInitialized = false;
+int autoBrightnessLevel = 8;
+int autoBrightnessLdrReference = 512;
+unsigned long lastAutoBrightnessChange = 0;
+bool displayHardwareStateInitialized = false;
+bool lastHardwareDisplayOn = false;
+int lastHardwareIntensity = -1;
 int displayTimer = DISPLAY_TIMEOUT;
 bool displayOn = true;
 bool motionDetected = false;
 bool brightnessManualOverride = false;  // Manual brightness mode flag
 int manualBrightness = 4;               // Manual brightness value (1-15)
 bool displayManualOverride = false;     // Manual display on/off override flag
-unsigned long displayManualOverrideTimeout = 0;  // Timeout for manual override (in milliseconds)
-#define DISPLAY_MANUAL_OVERRIDE_DURATION 300000  // 5 minutes
+unsigned long displayManualOverrideTimeout = 0;
 
 // Display OFF Schedule (OFF window)
 // When enabled, the display is forced OFF between the OFF start and OFF end times.
@@ -181,17 +95,9 @@ bool useFahrenheit = false;             // false = Celsius (default), true = Fah
 // Timezone Configuration
 int currentTimezone = 0;                // Index into timezone array (0 = Australia/Sydney by default)
 
-// Predefined timezone options (name and TZ string pairs)
-// Note: TZ strings are stored in flash memory to save RAM
-struct TimezoneOption {
-  const char* name;
-  const char* tzString;
-};
-
 // Timing
 unsigned long lastNTPUpdate = 0;
-unsigned long startupTime = 0;          // Track startup time for grace period
-#define STARTUP_GRACE_PERIOD 10000      // 10 seconds - keep display on at startup
+unsigned long startupTime = 0;
 unsigned long lastModeChange = 0;
 
 // ======================== FONT HELPER FUNCTIONS ========================
@@ -264,7 +170,9 @@ void displayTimeLarge();
 void displayTimeAndDate();
 
 // Centralized display power/intensity application
+int updateAmbientLightReading();
 int computeAmbientBrightnessFromLdr(int ldrValue);
+int computeStableAmbientBrightnessFromLdr(int filteredLdrValue);
 void applyDisplayHardwareState(bool on, int intensity);
 
 // ======================== SETUP ========================
@@ -280,65 +188,75 @@ void setup()
   printBanner();
   
   // Initialize display
-  DEBUG(Serial.println("Initializing LED matrix..."));
+  DBG_INFO("Initializing LED matrix");
   initMAX7219();
   sendCmdAll(CMD_SHUTDOWN, 1);
   sendCmdAll(CMD_INTENSITY, 5);
-  
-  // Initialize I2C for BMP/BME280
-  DEBUG(Serial.println("Initializing I2C and BMP/BME280 sensor..."));
-  // Initialize I2C with SDA on D2 (GPIO4) and SCL on D1 (GPIO5)
+
+  // Initialize I2C and BME280
+  DBG_INFO("Initializing I2C and BME280 sensor");
   Wire.begin();
   delay(100);
   testSensor();
-  
-  // Initialize sensors
+
+  // Initialize PIR
   pinMode(PIR_PIN, INPUT);
-  DEBUG(Serial.println("PIR sensor initialized"));
-  
-  // Display WiFi setup message
+  DBG_INFO("PIR sensor initialized");
+
+  // WiFiManager setup
   showMessage("WIFI...");
-  
-  // WiFiManager Setup
-  DEBUG(Serial.println("\nStarting WiFi Manager..."));
+  DBG_INFO("Starting WiFi Manager");
   wifiManager.setConfigPortalTimeout(180);
   wifiManager.setAPCallback(configModeCallback);
-  
-  // Try to connect, if fails start config portal
-  if (!wifiManager.autoConnect("LED_Clock_Setup")) {
-    DEBUG(Serial.println("Failed to connect, restarting..."));
+
+  if (!wifiManager.autoConnect(WIFI_AP_NAME)) {
+    DBG_ERROR("WiFi failed to connect, restarting");
     showMessage("WIFI FAIL");
     delay(3000);
     ESP.restart();
   }
-  
-  // Connected!
-  DEBUG(Serial.println("\nWiFi connected!"));
-  DEBUG(Serial.print("IP: "); Serial.println(WiFi.localIP()));
-  
+
+  DBG_INFO("WiFi connected: %s", WiFi.localIP().toString().c_str());
   showMessage(WiFi.localIP().toString().c_str());
   delay(2000);
-  
-  // Initialize NTP
+
+  // OTA setup
+  ArduinoOTA.setHostname(OTA_HOSTNAME);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([]() {
+    DBG_INFO("OTA update starting");
+    sendCmdAll(CMD_SHUTDOWN, 0);
+  });
+  ArduinoOTA.onEnd([]() {
+    DBG_INFO("OTA complete");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    DBG_VERBOSE("OTA: %u%%", progress * 100 / total);
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    DBG_ERROR("OTA error [%u]", error);
+  });
+  ArduinoOTA.begin();
+  DBG_INFO("OTA ready: hostname=%s", OTA_HOSTNAME);
+
+  // NTP sync
   showMessage("SYNC TIME");
   if (syncNTP()) {
-    DEBUG(Serial.println("Time synchronized!"));
+    DBG_INFO("Time synchronized");
   } else {
-    DEBUG(Serial.println("Time sync failed, will retry..."));
+    DBG_WARN("Time sync failed, will retry");
   }
-  
-  // Read initial sensor data
+
   updateSensorData();
-  
-  // Start web server
+
   setupWebServer();
   server.begin();
-  DEBUG(Serial.println("Web server started"));
-  
+  DBG_INFO("Web server started");
+
   showMessage("READY!");
   delay(1000);
-  
-  DEBUG(Serial.println("\n=== Setup Complete ===\n"));
+
+  DBG_INFO("Setup complete");
 }
 
 // ======================== MAIN LOOP ========================
@@ -347,30 +265,31 @@ void loop()
 {
   unsigned long currentMillis = millis();
   
-  // Handle web server requests
+  // Handle web server and OTA requests
   server.handleClient();
-  
+  ArduinoOTA.handle();
+
   // Periodic NTP sync
   if (currentMillis - lastNTPUpdate >= NTP_UPDATE_INTERVAL) {
     lastNTPUpdate = currentMillis;
-    DEBUG(Serial.println("\n--- Periodic Update ---"));
+    DBG_INFO("Periodic update");
     syncNTP();
     if (SENSOR_UPDATE_WITH_NTP) {
       updateSensorData();
     }
   }
-  
+
   // Update current time
   updateTime();
-  
+
   // Blink dots (2 Hz)
   showDots = (currentMillis % 1000) < 500;
-  
+
   // Cycle display modes
   int newMode = (currentMillis % (MODE_CYCLE_TIME * 3)) / MODE_CYCLE_TIME;
   if (newMode != currentMode) {
     currentMode = newMode;
-    DEBUG(Serial.print("Display mode: "); Serial.println(currentMode));
+    DBG_VERBOSE("Display mode: %d", currentMode);
   }
 
   // Handle brightness and motion detection (may change displayOn)
@@ -387,9 +306,9 @@ void loop()
     refreshAll();
   }
   
-  // Debug output (throttled)
+  // Status output (throttled, gated by DBG_INFO inside printStatus)
   static unsigned long lastDebug = 0;
-  if (DEBUG_ENABLED && currentMillis - lastDebug > 2000) {
+  if (currentMillis - lastDebug > 2000) {
     lastDebug = currentMillis;
     printStatus();
   }
@@ -509,32 +428,24 @@ void showMessage(const char* message) {
 // ======================== TIME FUNCTIONS ========================
 
 bool syncNTP() {
-  DEBUG(Serial.println("Syncing with NTP servers..."));
+  DBG_INFO("Syncing NTP");
 
-  // Get timezone string for selected timezone
   const char* tzString = timezones[currentTimezone].tzString;
-  
-  // Set timezone using modern TZ.h method with selected timezone
   configTime(tzString, NTP_SERVERS);
-  
-  // Wait for time sync (max 10 seconds)
+
   int attempts = 0;
   while (!time(nullptr) && attempts < 20) {
-    Serial.print(".");
     delay(500);
     attempts++;
   }
-  Serial.println();
-  
+
   if (attempts >= 20) {
-    DEBUG(Serial.println("NTP sync failed!"));
+    DBG_WARN("NTP sync failed");
     return false;
   }
-  
+
   updateTime();
-  DEBUG(Serial.printf("Time synced: %02d:%02d:%02d %02d/%02d/%d (TZ: %s)\n",
-                      hours, minutes, seconds, day, month, year,
-                      timezones[currentTimezone].name));
+  DBG_INFO("Time synced: %02d:%02d:%02d (TZ: %s)", hours, minutes, seconds, timezones[currentTimezone].name);
   return true;
 }
 
@@ -559,39 +470,31 @@ void updateTime() {
 // ======================== SENSOR FUNCTIONS ========================
 
 void testSensor() {
-  DEBUG(Serial.print("Testing BME280 sensor... "));
-  
-  // Initialize BME280 at address 0x76
+  DBG_INFO("Testing BME280 sensor");
+
   if (!bme280.begin(0x76)) {
     sensorAvailable = false;
-    DEBUG(Serial.println("NOT FOUND!"));
-    DEBUG(Serial.println("  Check wiring: SDA->D2, SCL->D1, VCC->3.3V"));
+    DBG_ERROR("BME280 not found - check SDA->D2, SCL->D1, VCC->3.3V");
     return;
   }
-  
-  // Set default BME280 settings
+
   bme280.setSampling(Adafruit_BME280::MODE_NORMAL,
                      Adafruit_BME280::SAMPLING_X2,
                      Adafruit_BME280::SAMPLING_X16,
                      Adafruit_BME280::SAMPLING_X1,
                      Adafruit_BME280::FILTER_X16,
                      Adafruit_BME280::STANDBY_MS_500);
-  
-  // Read first values to verify
+
   temperature = (int)bme280.readTemperature();
-  pressure = (int)bme280.readPressure() / 100;  // Convert to hPa
+  pressure = (int)bme280.readPressure() / 100;
   humidity = (int)bme280.readHumidity();
-  
-  // Check if readings are valid
+
   if (temperature < -40 || temperature > 85) {
     sensorAvailable = false;
-    DEBUG(Serial.println("FAILED!"));
+    DBG_ERROR("BME280 read validation failed");
   } else {
     sensorAvailable = true;
-    DEBUG(Serial.println("OK!"));
-    DEBUG(Serial.printf("  Temperature: %d°C\n", temperature));
-    DEBUG(Serial.printf("  Humidity: %d%%\n", humidity));
-    DEBUG(Serial.printf("  Pressure: %d hPa\n", pressure));
+    DBG_INFO("BME280 OK: %dC, %d%% RH, %d hPa", temperature, humidity, pressure);
   }
 }
 
@@ -604,27 +507,76 @@ void updateSensorData() {
   // Check if readings are valid
   if (temperature < -40 || temperature > 85 || pressure < 300 || pressure > 1200 || humidity < 0 || humidity > 100) {
     sensorAvailable = false;
-    DEBUG(Serial.println("Sensor read failed!"));
+    DBG_WARN("Sensor read failed");
   } else {
     sensorAvailable = true;
-    DEBUG(Serial.printf("Sensor: %d°C, %d%% humidity, %d hPa\n", temperature, humidity, pressure));
+    DBG_VERBOSE("Sensor: %dC, %d%% RH, %d hPa", temperature, humidity, pressure);
   }
 }
 
 // ======================== BRIGHTNESS & MOTION ========================
 
+int updateAmbientLightReading() {
+  lightLevel = analogRead(LDR_PIN);
+
+  if (!ldrFilterInitialized) {
+    filteredLightLevel = lightLevel;
+    ldrFilterInitialized = true;
+  } else {
+    filteredLightLevel = ((filteredLightLevel * (LDR_FILTER_WEIGHT - 1)) + lightLevel) / LDR_FILTER_WEIGHT;
+  }
+
+  return filteredLightLevel;
+}
+
 int computeAmbientBrightnessFromLdr(int ldrValue) {
-  // Inverted mapping: darker -> lower brightness, brighter -> higher brightness
-  return 15 - map(constrain(ldrValue, 0, 1023), 0, 1023, 1, 15);
+  // Current divider reads higher ADC values in darker rooms; keep display brightness lower there.
+  return map(constrain(ldrValue, 0, 1023), 0, 1023, 15, 0);
+}
+
+int computeStableAmbientBrightnessFromLdr(int filteredLdrValue) {
+  int candidateBrightness = computeAmbientBrightnessFromLdr(filteredLdrValue);
+
+  if (!autoBrightnessInitialized) {
+    autoBrightnessLevel = candidateBrightness;
+    autoBrightnessLdrReference = filteredLdrValue;
+    lastAutoBrightnessChange = millis();
+    autoBrightnessInitialized = true;
+    return autoBrightnessLevel;
+  }
+
+  if (candidateBrightness != autoBrightnessLevel) {
+    int ldrDifference = abs(filteredLdrValue - autoBrightnessLdrReference);
+    unsigned long now = millis();
+    if (ldrDifference >= LDR_BRIGHTNESS_HYSTERESIS &&
+        now - lastAutoBrightnessChange >= BRIGHTNESS_UPDATE_INTERVAL) {
+      autoBrightnessLevel = candidateBrightness;
+      autoBrightnessLdrReference = filteredLdrValue;
+      lastAutoBrightnessChange = now;
+    }
+  }
+
+  return autoBrightnessLevel;
 }
 
 void applyDisplayHardwareState(bool on, int intensity) {
   // Intensity is only meaningful when ON. Clamp defensively.
   int clamped = constrain(intensity, 0, 15);
 
-  sendCmdAll(CMD_SHUTDOWN, on ? 1 : 0);
-  if (on) {
+  bool displayStateChanged = !displayHardwareStateInitialized || lastHardwareDisplayOn != on;
+  bool intensityChanged = !displayHardwareStateInitialized || lastHardwareIntensity != clamped;
+
+  if (displayStateChanged) {
+    sendCmdAll(CMD_SHUTDOWN, on ? 1 : 0);
+  }
+  if (on && (displayStateChanged || intensityChanged)) {
     sendCmdAll(CMD_INTENSITY, clamped);
+  }
+
+  displayHardwareStateInitialized = true;
+  lastHardwareDisplayOn = on;
+  if (on) {
+    lastHardwareIntensity = clamped;
   }
 }
 
@@ -659,26 +611,27 @@ void handleBrightnessAndMotion() {
     displayOn = true;
     displayTimer = DISPLAY_TIMEOUT;  // Reset display timer to keep it on
 
-    int ambientBrightness = computeAmbientBrightnessFromLdr(analogRead(LDR_PIN));
+    int filteredLdr = updateAmbientLightReading();
+    int ambientBrightness = computeStableAmbientBrightnessFromLdr(filteredLdr);
     brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
     applyDisplayHardwareState(true, brightness);
     return;
   }
   
   // Read ambient light
-  lightLevel = analogRead(LDR_PIN);
+  int filteredLdr = updateAmbientLightReading();
   
   // Check if light level has changed by ±5%
   int lightDifference = abs(lightLevel - previousLightLevel);
   int changeThreshold = (previousLightLevel > 0) ? (previousLightLevel * 5 / 100) : 51;  // 5% of previous level, minimum 51
   if (lightDifference >= changeThreshold) {
     lightLevelChanged = true;
-    DEBUG(Serial.printf("Light level changed: %d -> %d (diff: %d, threshold: %d)\n", previousLightLevel, lightLevel, lightDifference, changeThreshold));
+    DBG_VERBOSE("Light level: %d->%d (diff=%d)", previousLightLevel, lightLevel, lightDifference);
   }
   previousLightLevel = lightLevel;  // Always update for next comparison
   
-  // Map to brightness (inverted: darker = dimmer)
-  int ambientBrightness = computeAmbientBrightnessFromLdr(lightLevel);
+  // Map smoothed LDR readings to brightness with hysteresis to avoid flicker.
+  int ambientBrightness = computeStableAmbientBrightnessFromLdr(filteredLdr);
   
   // Check motion
   motionDetected = digitalRead(PIR_PIN);
@@ -689,7 +642,7 @@ void handleBrightnessAndMotion() {
   // Check if manual override timeout has expired
   if (displayManualOverride && millis() > displayManualOverrideTimeout) {
     displayManualOverride = false;
-    DEBUG(Serial.println("Display manual override timeout - reverting to automatic control"));
+    DBG_INFO("Display manual override expired");
   }
   
   // If manual override is active, respect the user's choice
@@ -707,9 +660,9 @@ void handleBrightnessAndMotion() {
     if (displayOn) {
       displayOn = false;
       applyDisplayHardwareState(false, 0);
-      DEBUG(Serial.printf("Display forced OFF by schedule (%02d:%02d-%02d:%02d)\n",
-                          scheduleOffStartHour, scheduleOffStartMinute,
-                          scheduleOffEndHour, scheduleOffEndMinute));
+      DBG_INFO("Display OFF by schedule (%02d:%02d-%02d:%02d)",
+               scheduleOffStartHour, scheduleOffStartMinute,
+               scheduleOffEndHour, scheduleOffEndMinute);
     }
     displayTimer = 0;
     return;
@@ -1142,7 +1095,7 @@ void setupWebServer() {
     if (server.hasArg("mode")) {
       // Toggle auto/manual mode
       brightnessManualOverride = !brightnessManualOverride;
-      DEBUG(Serial.printf("Brightness mode: %s\n", brightnessManualOverride ? "Manual" : "Auto"));
+      DBG_INFO("Brightness mode: %s", brightnessManualOverride ? "Manual" : "Auto");
       server.send(200, "text/plain", "OK");
       return;
     }
@@ -1151,8 +1104,10 @@ void setupWebServer() {
       int newBrightness = server.arg("value").toInt();
       manualBrightness = constrain(newBrightness, 1, 15);
       brightness = manualBrightness;
-      sendCmdAll(CMD_INTENSITY, brightness);
-      DEBUG(Serial.printf("Manual brightness set to: %d\n", manualBrightness));
+      if (displayOn) {
+        applyDisplayHardwareState(true, brightness);
+      }
+      DBG_INFO("Manual brightness: %d", manualBrightness);
     }
     server.send(200, "text/plain", "OK");
   });
@@ -1161,7 +1116,7 @@ void setupWebServer() {
   server.on("/timeformat", []() {
     if (server.hasArg("mode")) {
       use24HourFormat = !use24HourFormat;
-      DEBUG(Serial.printf("Time format: %s\n", use24HourFormat ? "24-hour" : "12-hour"));
+      DBG_INFO("Time format: %s", use24HourFormat ? "24-hour" : "12-hour");
 
       // Force an immediate redraw so the user sees the change instantly on the matrix
       if (displayOn) {
@@ -1184,7 +1139,7 @@ void setupWebServer() {
     if (server.hasArg("mode")) {
       // Toggle Celsius/Fahrenheit
       useFahrenheit = !useFahrenheit;
-      DEBUG(Serial.printf("Temperature unit: %s\n", useFahrenheit ? "Fahrenheit" : "Celsius"));
+      DBG_INFO("Temp unit: %s", useFahrenheit ? "Fahrenheit" : "Celsius");
 
       // Force an immediate redraw so the user sees the change instantly on the matrix
       if (displayOn) {
@@ -1209,7 +1164,7 @@ void setupWebServer() {
       int newTimezone = server.arg("tz").toInt();
       if (newTimezone >= 0 && newTimezone < numTimezones) {
         currentTimezone = newTimezone;
-        DEBUG(Serial.printf("Timezone changed to: %s\n", timezones[currentTimezone].name));
+        DBG_INFO("Timezone: %s", timezones[currentTimezone].name);
         
         // Re-sync time with new timezone
         syncNTP();
@@ -1228,17 +1183,16 @@ void setupWebServer() {
 
       // Take a fresh LDR reading so turning ON picks a sane intensity immediately,
       // rather than relying on a potentially stale `lightLevel` value.
-      int ldrNow = analogRead(LDR_PIN);
-      lightLevel = ldrNow;
+      int filteredLdr = updateAmbientLightReading();
 
       if (displayOn) {
-        int ambientBrightness = computeAmbientBrightnessFromLdr(ldrNow);
+        int ambientBrightness = computeStableAmbientBrightnessFromLdr(filteredLdr);
         brightness = brightnessManualOverride ? manualBrightness : ambientBrightness;
         applyDisplayHardwareState(true, brightness);
-        DEBUG(Serial.printf("Display toggled ON (manual override for 5 minutes)\n"));
+        DBG_INFO("Display ON (manual, 5 min)");
       } else {
         applyDisplayHardwareState(false, 0);
-        DEBUG(Serial.printf("Display toggled OFF (manual override for 5 minutes)\n"));
+        DBG_INFO("Display OFF (manual, 5 min)");
       }
       server.send(200, "text/plain", "OK");
       return;
@@ -1268,10 +1222,10 @@ void setupWebServer() {
       scheduleOffEndMinute = constrain(server.arg("end_min").toInt(), 0, 59);
     }
     
-    DEBUG(Serial.printf("Schedule updated - Enabled: %s, OFF: %02d:%02d-%02d:%02d\n",
-                        scheduleOffEnabled ? "Yes" : "No", 
-                        scheduleOffStartHour, scheduleOffStartMinute,
-                        scheduleOffEndHour, scheduleOffEndMinute));
+    DBG_INFO("Schedule: %s, %02d:%02d-%02d:%02d",
+             scheduleOffEnabled ? "ON" : "OFF",
+             scheduleOffStartHour, scheduleOffStartMinute,
+             scheduleOffEndHour, scheduleOffEndMinute);
     
     server.send(200, "text/plain", "OK");
   });
@@ -1289,11 +1243,8 @@ void setupWebServer() {
 // ======================== HELPER FUNCTIONS ========================
 
 void configModeCallback(WiFiManager* myWiFiManager) {
-  DEBUG(Serial.println("\n=== WiFi Config Mode ==="));
-  DEBUG(Serial.println("Connect to AP: LED_Clock_Setup"));
-  DEBUG(Serial.print("Config portal IP: "));
-  DEBUG(Serial.println(WiFi.softAPIP()));
-  
+  DBG_INFO("WiFi config mode - connect to AP: %s", WIFI_AP_NAME);
+  DBG_INFO("Config portal IP: %s", WiFi.softAPIP().toString().c_str());
   showMessage("SETUP AP");
   delay(2000);
   showMessage("LED CLOCK");
@@ -1313,47 +1264,25 @@ void printBanner() {
 }
 
 void printStatus() {
-  Serial.println("--- Status ---");
-
-  // Time and Date
   if (use24HourFormat) {
-    Serial.printf("Time: %02d:%02d:%02d | Date: %02d/%02d/%d",
-                  hours24, minutes, seconds, day, month, year);
+    DBG_INFO("Time: %02d:%02d:%02d | Date: %02d/%02d/%d",
+             hours24, minutes, seconds, day, month, year);
   } else {
-    Serial.printf("Time: %02d:%02d:%02d %s | Date: %02d/%02d/%d",
-                  hours, minutes, seconds, (hours24 < 12) ? "AM" : "PM", day, month, year);
+    DBG_INFO("Time: %02d:%02d:%02d %s | Date: %02d/%02d/%d",
+             hours, minutes, seconds, (hours24 < 12) ? "AM" : "PM", day, month, year);
   }
-
-  // Sensor data
   if (sensorAvailable) {
-    Serial.printf(" | Temp: %d°C | Humidity: %d%%", temperature, humidity);
+    DBG_INFO("Sensor: %dC, %d%% RH", temperature, humidity);
   } else {
-    Serial.print(" | Sensor Not Available");
+    DBG_INFO("Sensor not available");
   }
-  Serial.println();
-
-  // Light and Brightness
-  Serial.printf("Light: %d | Bright: %d\n", lightLevel, brightness);
-
-  // Motion, Display, Timer, Schedule
+  DBG_INFO("Light: %d | Bright: %d", lightLevel, brightness);
   bool withinOffWindow = isWithinScheduleOffWindow();
-  String scheduleStatus;
-  if (!scheduleOffEnabled) {
-    scheduleStatus = "DISABLED";
-  } else if (withinOffWindow) {
-    scheduleStatus = "ACTIVE-OFF";  // Inside OFF window
-  } else {
-    scheduleStatus = "ACTIVE";      // Outside OFF window
-  }
-
-  Serial.printf("Motion: %s | Display: %s | Timer: %d | Schedule: %s (%02d:%02d-%02d:%02d)\n",
-                motionDetected ? "YES" : "NO",
-                displayOn ? "ON" : "OFF",
-                displayTimer,
-                scheduleStatus.c_str(),
-                scheduleOffStartHour, scheduleOffStartMinute,
-                scheduleOffEndHour, scheduleOffEndMinute);
-  Serial.println();
+  const char* schedStat = !scheduleOffEnabled ? "DISABLED" : (withinOffWindow ? "ACTIVE-OFF" : "ACTIVE");
+  DBG_INFO("Motion: %s | Display: %s | Timer: %d | Sched: %s (%02d:%02d-%02d:%02d)",
+           motionDetected ? "YES" : "NO", displayOn ? "ON" : "OFF", displayTimer,
+           schedStat, scheduleOffStartHour, scheduleOffStartMinute,
+           scheduleOffEndHour, scheduleOffEndMinute);
 }
 
 // ======================== END OF CODE ========================

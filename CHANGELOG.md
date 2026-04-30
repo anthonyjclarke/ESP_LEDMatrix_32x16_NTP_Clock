@@ -5,6 +5,76 @@ All notable changes to the ESP8266 LED Matrix Clock project will be documented i
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-04-30
+
+### Added
+- OTA firmware update support via `ArduinoOTA` (ESP8266 built-in). Hostname `led-clock`, password
+  in `config.h`. Display blanks during update.
+- `include/config.h` — all user-tuneable constants (pins, timing, brightness, WiFi AP name, OTA
+  credentials) extracted from `main.cpp` following global scaffolding conventions
+- `include/debug.h` — leveled serial debug macros: `DBG_ERROR`, `DBG_WARN`, `DBG_INFO`,
+  `DBG_VERBOSE`. Level controlled via `-DDEBUG_LEVEL=N` build flag (default 3)
+- `platformio.ini` now sets `-DDEBUG_LEVEL=3` via `build_flags`
+
+### Changed
+- All `DEBUG(Serial.xxx)` calls replaced with appropriate `DBG_*` macros at the correct level
+- `printStatus()` rewritten to use `DBG_INFO` internally; raw `Serial.printf` removed from
+  application code (banner output remains raw Serial — intentionally unconditional)
+- `#define DISPLAY_MANUAL_OVERRIDE_DURATION` and `#define STARTUP_GRACE_PERIOD` moved from
+  globals section of `main.cpp` to `config.h`
+- Hardcoded `"LED_Clock_Setup"` AP name replaced with `WIFI_AP_NAME` constant from `config.h`
+- NTP sync polling dots (`Serial.print(".")`) removed; replaced with a single `DBG_INFO` on result
+- CLAUDE.md fully rewritten: updated project structure, debug level table, OTA section, corrected
+  function line numbers, removed stale deviation notes for config.h and debug.h
+
+## [2.8.2] - 2026-04-30
+
+### Changed
+- Added `#pragma once` to `include/max7219.h` and `include/fonts.h`
+- Removed redundant `#include "Arduino.h"` at top of `src/main.cpp` (duplicate of `#include <Arduino.h>` lower in the file)
+- Removed unused `TimezoneOption` struct in `src/main.cpp` (dead code; `TimezoneInfo` from `timezones.h` is used throughout)
+- Updated CLAUDE.md with corrected line numbers, accurate file size, and a note on intentional deviations from global scaffolding rules
+
+## [2.8.1] - 2026-04-30
+
+### Changed
+- Smoothed LDR readings before using them for automatic brightness decisions
+- Added auto-brightness hysteresis to prevent flicker from small ambient light changes
+- Added a minimum interval between automatic brightness changes
+- Avoid repeated MAX7219 intensity/shutdown commands when display hardware state has not changed
+- Updated LDR-to-brightness mapping so darker ambient conditions produce lower LED brightness
+- Removed embedded TODO and changelog/release notes from `src/main.cpp`; this file is now the canonical change history
+
+### Fixed
+- Automatic brightness no longer rapidly toggles when LDR readings hover around a brightness boundary
+
+### TODO
+- Add LDR sensitivity controls via the web interface, including enable/disable and threshold adjustment
+- Add OpenWeatherMap API integration for weather display on the matrix and webpage
+- Add OTA firmware update support
+- Complete web interface configuration coverage
+- Consolidate and tidy the web interface into a cleaner single-page layout
+- Persist runtime config, including timezone, time format, and temperature unit, to SPIFFS/LittleFS
+- Add configuration backup and restore via JSON export/import
+- Support multiple schedule windows
+- Add configurable display mode preferences
+- Add scrolling text messages for custom announcements
+- Add MQTT support for Home Assistant integration
+- Add indoor air quality sensor support
+- Display uptime and WiFi signal strength
+- Add manual NTP sync trigger button
+- Show next scheduled display on/off event countdown
+- Add temperature/humidity history graphing
+- Move timezone array to PROGMEM to save SRAM
+- Refactor monolithic `main.cpp` into display, web, sensors, and time modules
+- Add unit tests for schedule logic and rotation math
+- Add structured logging levels instead of the current DEBUG macro
+- Add watchdog timer for crash recovery
+- Support larger matrix displays
+- Explore RGB HUB75 matrix support
+- Add optional buzzer support for chimes or alarms
+- Add optional external RTC support for timekeeping during WiFi outages
+
 ## [2.8.0] - 2026-01-16
 
 ### Added
@@ -199,7 +269,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History Summary
 
-- **2.8.x** - Documentation and code quality improvements
+- **2.8.x** - Documentation, brightness stability, and code quality improvements
 - **2.7.x** - Web interface enhancements (LED mirror, timezone UX)
 - **2.6.x** - Brightness control visibility improvements
 - **2.5.x** - UI polish and temperature display fixes
@@ -212,6 +282,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[2.8.1]: https://github.com/anthonyjclarke/ESP_LEDMatrix_32x16_NTP_Clock/compare/v2.8.0...v2.8.1
 [2.8.0]: https://github.com/anthonyjclarke/ESP_LEDMatrix_32x16_NTP_Clock/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/anthonyjclarke/ESP_LEDMatrix_32x16_NTP_Clock/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/anthonyjclarke/ESP_LEDMatrix_32x16_NTP_Clock/compare/v2.5.0...v2.6.0

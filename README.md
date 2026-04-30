@@ -1,275 +1,200 @@
 # ESP8266 LED Matrix Clock
 
-**Version:** 2.8.0
-**Build System:** PlatformIO
-**Platform:** ESP8266 (D1 Mini Pro)
+**Version:** 2.9.0 | **Platform:** ESP8266 D1 Mini Pro | **Build:** PlatformIO
 
-NTP-synchronized clock with 32×16 LED matrix display, featuring automatic brightness, motion detection, environmental monitoring, and comprehensive web interface.
+NTP-synchronized clock on a 32×16 LED matrix with automatic brightness, motion detection,
+environmental monitoring, OTA updates, and a web configuration interface.
+
+---
 
 ## Features
 
-- **NTP Time Synchronization** - Automatic DST handling with 88 global timezone support
-- **Environmental Monitoring** - BME280 sensor for temperature, humidity, and pressure
-- **Smart Display Control** - PIR motion detection with auto-off and scheduled operation
-- **Automatic Brightness** - LDR-based ambient light adjustment
-- **Web Interface** - AJAX-based configuration with live LED matrix mirror
-- **Multiple Display Modes** - Three rotating layouts (time+temp, large time, time+date)
-- **Flexible Configuration** - 12/24-hour time, °C/°F units, manual overrides
+- **NTP Time Synchronization** — Automatic DST handling, 88 global timezone support
+- **Environmental Monitoring** — BME280 sensor (temperature, humidity, pressure)
+- **Smart Display Control** — PIR motion detection with auto-off and scheduled operation
+- **Automatic Brightness** — LDR-based ambient light adjustment with smoothing and hysteresis
+- **OTA Firmware Updates** — Upload new firmware over Wi-Fi (hostname `led-clock`)
+- **Web Interface** — AJAX configuration with live LED matrix mirror
+- **Multiple Display Modes** — Three rotating layouts (time+temp, large time, time+date)
+- **Flexible Configuration** — 12/24-hour time, °C/°F, manual overrides
 
-## Hardware Requirements
+---
+
+## Hardware
 
 ### Components
+
 - ESP8266 D1 Mini Pro (WeMos)
-- 8× MAX7219 LED matrix modules (4×2 arrangement = 32×16 pixels)
+- 8× MAX7219 LED matrix modules (4×2 = 32×16 pixels)
 - BME280 environmental sensor (I²C)
 - PIR motion sensor (HC-SR501 or similar)
-- LDR photoresistor with 10kΩ resistor
-- 100-470µF capacitor (for LED power stability)
+- LDR photoresistor with 10 kΩ resistor
+- 100–470 µF capacitor (LED power stability)
 
 ### Pin Connections
 
-| Component | ESP8266 Pin | GPIO | Notes |
-|-----------|-------------|------|-------|
-| MAX7219 DIN | D8 | GPIO15 | SPI MOSI |
-| MAX7219 CS | D7 | GPIO13 | Chip Select |
-| MAX7219 CLK | D6 | GPIO12 | SPI Clock |
-| BME280 SDA | D2 | GPIO4 | I²C Data |
-| BME280 SCL | D1 | GPIO5 | I²C Clock |
-| PIR Sensor | D3 | GPIO0 | Motion detect |
-| LDR | A0 | A0 | Analog input |
+| Component    | ESP8266 | GPIO   | Notes                                      |
+|:-------------|:--------|:-------|:-------------------------------------------|
+| MAX7219 DIN  | D8      | GPIO15 | SPI MOSI                                   |
+| MAX7219 CS   | D7      | GPIO13 | Chip Select                                |
+| MAX7219 CLK  | D6      | GPIO12 | SPI Clock                                  |
+| BME280 SDA   | D2      | GPIO4  | I²C Data                                   |
+| BME280 SCL   | D1      | GPIO5  | I²C Clock                                  |
+| PIR Sensor   | D3      | GPIO0  | Motion detect                              |
+| LDR          | A0      | A0     | 3.3V → 10 kΩ → A0 → LDR → GND             |
 
-**Power:**
-- MAX7219: 5V (ensure 2A supply capacity)
-- BME280: 3.3V
-- PIR: 5V
-- LDR circuit: 3.3V → 10kΩ → A0 → LDR → GND
+**Power:** 5V USB, ~2A capacity for full LED brightness.
 
-**Important:** BME280 I²C address is configured for **0x76** (not the default 0x77). Verify your module's address if sensor not detected.
+**Important:** BME280 I²C address is **0x76** (not the default 0x77). Run an I²C scanner if the sensor is not detected.
+
+---
 
 ## Installation
 
-### PlatformIO
-
 ```bash
-# Clone the repository
 git clone https://github.com/anthonyjclarke/ESP_LEDMatrix_32x16_NTP_Clock.git
 cd ESP_LEDMatrix_32x16_NTP_Clock
-
-# Build and upload
 pio run --target upload
-
-# Monitor serial output
 pio device monitor -b 115200
 ```
 
-### First-Time Setup
+### First-Time WiFi Setup
 
-1. Upload firmware to ESP8266
-2. ESP creates WiFi AP: **LED_Clock_Setup**
-3. Connect to AP with phone/computer
-4. Captive portal opens (or navigate to 192.168.4.1)
-5. Select your WiFi network and enter credentials
-6. Click Save - device connects and remembers settings
+1. Upload firmware
+2. ESP creates AP: **LED\_Clock\_Setup**
+3. Connect and configure via captive portal (or 192.168.4.1)
+4. Device connects and stores credentials
 
-To reset WiFi: Visit `http://[device-ip]/reset`
+To reset WiFi: `http://[device-ip]/reset`
+
+---
 
 ## Configuration
 
 ### Web Interface
 
-Access the web interface at `http://[device-ip]/`
+`http://[device-ip]/`
 
-**Available Settings:**
-- Timezone selection (88 global cities)
-- Temperature unit (Celsius/Fahrenheit)
-- Time format (12-hour/24-hour)
-- Display brightness (Auto/Manual with 1-15 slider)
+- Timezone (88 global cities)
+- Temperature unit (°C / °F)
+- Time format (12-hour / 24-hour)
+- Display brightness (Auto / Manual 1–15)
 - Display schedule (OFF window with start/end times)
-- Manual display on/off toggle
+- Manual display on/off (5-minute override)
 - WiFi reset
 
-### Compile-Time Settings
+### Compile-Time Settings (`include/config.h`)
 
-Edit `src/main.cpp` to customize default behavior:
+All tuneable constants live in `include/config.h`. Key settings:
 
 ```cpp
-#define MY_TZ TZ_Australia_Sydney     // Default timezone
-#define DISPLAY_TIMEOUT 60             // Seconds before auto-off
-#define MODE_CYCLE_TIME 20000          // Display mode rotation (ms)
-#define DEBUG_ENABLED true             // Serial debug output
+#define MY_TZ        TZ_Australia_Sydney  // Default timezone (runtime selectable via web)
+#define DISPLAY_TIMEOUT  60               // Seconds before auto-off (no motion)
+#define MODE_CYCLE_TIME  20000            // Display mode rotation ms
+#define OTA_HOSTNAME     "led-clock"      // mDNS hostname for OTA
+#define OTA_PASSWORD     "ledclock"       // Change before untrusted network deployment
 ```
 
-See [CLAUDE.md](CLAUDE.md) for complete configuration reference.
+See [CLAUDE.md](CLAUDE.md) for the full configuration reference.
+
+### OTA Updates
+
+With the device on the network:
+
+```bash
+pio run --target upload --upload-port led-clock.local
+```
+
+Or use Arduino IDE: Sketch → Upload via OTA. The display blanks during the update.
+
+---
 
 ## Web API
 
-RESTful API endpoints for automation:
-
 ```bash
-# Get all status data
-curl http://[device-ip]/api/all
-
-# Get display pixel buffer
-curl http://[device-ip]/api/display
-
-# Toggle brightness mode (Auto/Manual)
-curl http://[device-ip]/brightness?mode=toggle
-
-# Set manual brightness (1-15)
-curl http://[device-ip]/brightness?value=10
-
-# Toggle time format (12/24 hour)
-curl http://[device-ip]/timeformat?mode=toggle
-
-# Toggle temperature unit (C/F)
-curl http://[device-ip]/temperature?mode=toggle
-
-# Change timezone (0-87 index)
-curl http://[device-ip]/timezone?tz=13
-
-# Toggle display on/off
-curl http://[device-ip]/display?mode=toggle
-
-# Update schedule
+curl http://[device-ip]/api/all                         # All status data
+curl http://[device-ip]/api/display                     # Pixel buffer (32×16)
+curl http://[device-ip]/brightness?mode=toggle          # Auto ↔ Manual
+curl http://[device-ip]/brightness?value=10             # Set manual brightness
+curl http://[device-ip]/timeformat?mode=toggle          # 12h ↔ 24h
+curl http://[device-ip]/temperature?mode=toggle         # °C ↔ °F
+curl "http://[device-ip]/timezone?tz=13"                # Select timezone by index
+curl http://[device-ip]/display?mode=toggle             # Display on/off
 curl "http://[device-ip]/schedule?enabled=1&start_hour=22&start_min=0&end_hour=6&end_min=0"
 ```
 
+---
+
 ## Display Modes
 
-Three rotating display modes (20-second cycle):
+Three rotating layouts (20-second cycle):
 
 1. **Mode 0:** Time + Temperature/Humidity
    - 12h: H:MM:SS with temp/humidity on second line
-   - 24h: HH:MM (no seconds due to space constraints)
+   - 24h: HH:MM (seconds omitted; 32 px width constraint)
 
-2. **Mode 1:** Large Time Display
-   - 5×16 font for maximum visibility
-   - 12-hour format only
+2. **Mode 1:** Large Time (5×16 font, 12-hour only)
 
-3. **Mode 2:** Time + Date
-   - Time on top line
-   - Date (DD/MMM/YY) on bottom line
+3. **Mode 2:** Time + Date (DD/MMM/YY on second line)
+
+---
 
 ## Power Management
 
-Smart display control with priority hierarchy:
+Priority hierarchy:
 
-1. **Startup grace period** (10 seconds): Always on
-2. **Schedule OFF window**: Forced off during configured times
-3. **Manual override**: User toggle via web (5-minute timeout)
-4. **Motion detection**: Auto-on with 60-second countdown
+1. **Startup grace** (10 s): Always on
+2. **Manual override**: User toggle via web (5-min timeout)
+3. **Schedule OFF window**: Forced off during configured times
+4. **Motion detection**: Auto-on with 60 s countdown
 5. **Idle timeout**: Gradual fade to off
 
-Brightness automatically adjusts based on ambient light (LDR sensor).
+Brightness adjusts automatically via LDR.
+
+---
 
 ## Development
 
-### Building
-
 ```bash
-# Compile
-pio run
-
-# Upload
-pio run --target upload
-
-# Clean build
-pio run --target clean
+pio run                        # Compile
+pio run --target upload        # Upload (USB)
+pio run --target upload --upload-port led-clock.local  # Upload (OTA)
+pio run --target clean         # Clean
 ```
 
-### Serial Debug
+### Debug Output
 
-Enable debug output in `src/main.cpp`:
+Controlled by `-DDEBUG_LEVEL=N` in `platformio.ini` (default 3):
 
-```cpp
-#define DEBUG_ENABLED true
-```
-
-Serial monitor shows:
-- Boot banner with version and build date
-- WiFi connection status
-- NTP sync events
-- Sensor readings
-- Display state changes
-- 2-second status updates
+| Level | Output                     |
+|:------|:---------------------------|
+| 0     | Silent                     |
+| 1     | `[E]` errors only          |
+| 2     | + `[W]` warnings           |
+| 3     | + `[I]` info (default)     |
+| 4     | + `[V]` verbose            |
 
 ### Project Structure
 
 ```
 ESP_LEDMatrix_32x16_NTP_Clock/
-├── platformio.ini          # Build configuration
+├── platformio.ini          # Build config; DEBUG_LEVEL=3
 ├── README.md               # This file
-├── CHANGELOG.md           # Version history
-├── CLAUDE.md              # AI assistant documentation
+├── CHANGELOG.md            # Version history
+├── CLAUDE.md               # Technical reference for AI/developers
 ├── src/
-│   └── main.cpp           # Main application code
+│   └── main.cpp            # Main application
 └── include/
-    ├── max7219.h          # LED driver with rotation support
-    ├── fonts.h            # PROGMEM font bitmaps
-    └── timezones.h        # 88 POSIX timezone definitions
+    ├── config.h            # User-tuneable constants (pins, timing, OTA)
+    ├── debug.h             # Leveled DBG_* macros
+    ├── max7219.h           # LED driver with rotation support
+    ├── fonts.h             # PROGMEM font bitmaps
+    └── timezones.h         # 88 POSIX timezone definitions
 ```
-
-## Documentation
-
-- **[CHANGELOG.md](CHANGELOG.md)** - Complete version history
-- **[CLAUDE.md](CLAUDE.md)** - Detailed technical documentation
-  - Architecture notes
-  - Configuration reference
-  - Pin mappings
-  - API documentation
-  - Development guide
-
-## Troubleshooting
-
-**Sensor not detected:**
-- Verify BME280 I²C address (0x76 vs 0x77)
-- Check wiring: SDA→D2, SCL→D1, VCC→3.3V
-- Run I²C scanner to confirm address
-
-**Display issues:**
-- Ensure 5V supply can handle ~2A
-- Add 100-470µF capacitor to VCC/GND
-- Check MAX7219 wiring and module count
-
-**WiFi connection fails:**
-- Reset WiFi via web interface `/reset`
-- Check AP name "LED_Clock_Setup" appears
-- Try factory reset (re-upload firmware)
-
-**Time not syncing:**
-- Verify WiFi connection
-- Check serial output for NTP errors
-- Confirm timezone setting is correct
-
-## Credits & Acknowledgements
-
-This project is a modern rewrite and enhancement of the original work by:
-
-**Original Code:** @cbm80amiga
-- YouTube: https://www.youtube.com/watch?v=2wJOdi0xzas&t=32s
-- Original Arduino sketch and hardware design
-
-**MAX7219 Driver Functions:** Pawel A. Hernik
-- Efficient LED matrix control with rotation support
-
-**Modern Rewrite & Enhancements:** Anthony Clarke (2025-2026)
-- PlatformIO migration
-- WiFiManager integration
-- BME280 sensor support
-- Web interface with AJAX
-- 88 timezone support with POSIX TZ strings
-- Power management and scheduling
-- Comprehensive documentation
-
-## License
-
-See original project for license information.
-
-## Links
-
-- **GitHub:** [ESP_LEDMatrix_32x16_NTP_Clock](https://github.com/anthonyjclarke/ESP_LEDMatrix_32x16_NTP_Clock)
-- **Author:** [Anthony Clarke](https://bsky.app/profile/anthonyjclarke.bsky.social)
 
 ---
 
-**Note:** This is an ESP8266 project (not ESP32). Uses D1 Mini Pro with 16MB flash.
+## Documentation
+
+- [CHANGELOG.md](CHANGELOG.md) — Version history
+- [CLAUDE.md](CLAUDE.md) — Architecture, configuration reference, API docs
